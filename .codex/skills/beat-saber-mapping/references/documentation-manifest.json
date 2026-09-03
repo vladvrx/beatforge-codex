@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "accessedDate": "2026-08-22",
+  "sources": [
+    {
+      "url": "https://beatsaber.com/documentation/level-mappers/index.html",
+      "authority": "Beat Games",
+      "revision": "HTTP 200 on 2026-08-22; official level-mapper index still at this URL",
+      "purpose": "Official level-editor object semantics and level-mapper workflow"
+    },
+    {
+      "url": "https://bsmg.wiki/mapping/map-format.html",
+      "authority": "Beat Saber Modding Group",
+      "revision": "HTTP 200 on 2026-08-22; v2/v3/v4 schema routing unchanged",
+      "purpose": "Beat Saber map format routing and compatibility"
+    },
+    {
+      "url": "https://bsmg.wiki/mapping/map-format/info.html",
+      "authority": "Beat Saber Modding Group",
+      "revision": "live reference accessed 2026-08-21",
+      "purpose": "Info.dat v2.1 metadata, environment indices, and color schemes"
+    },
+    {
+      "url": "https://bsmg.wiki/mapping/map-format/beatmap.html",
+      "authority": "Beat Saber Modding Group",
+      "revision": "live reference accessed 2026-08-21",
+      "purpose": "v3.3 gameplay objects, arcs, chains, bombs, walls, and lighting serialization"
+    },
+    {
+      "url": "https://bsmg.wiki/mapping/basic-mapping.html",
+      "authority": "Beat Saber Modding Group",
+      "revision": "HTTP 200 on 2026-08-22; parity, flow, and handclap guidance still at this URL",
+      "purpose": "Parity, flow, vision, handclap, and playability conventions"
+    },
+    {
+      "url": "https://developers.google.com/optimization/cp",
+      "authority": "Google OR-Tools",
+      "revision": "live documentation accessed 2026-08-21",
+      "purpose": "CP-SAT constraint solver behavior"
+    },
+    {
+      "url": "https://musicbrainz.org/doc/MusicBrainz_API/Search",
+      "authority": "MetaBrainz Foundation",
+      "revision": "live API documentation accessed 2026-08-21",
+      "purpose": "Exact recording and Official release matching"
+    },
+    {
+      "url": "https://musicbrainz.org/doc/Cover_Art_Archive/API",
+      "authority": "MetaBrainz Foundation",
+      "revision": "live API documentation accessed 2026-08-21",
+      "purpose": "Approved front-cover retrieval"
+    },
+    {
+      "url": "https://developers.openai.com/codex/noninteractive/",
+      "authority": "OpenAI",
+      "revision": "Alias still published; fetch of this exact path timed out on 2026-08-22. Canonical page is /codex/non-interactive-mode",
+      "purpose": "Historical noninteractive URL kept so older bookmarks resolve"
+    },
+    {
+      "url": "https://developers.openai.com/codex/non-interactive-mode",
+      "authority": "OpenAI",
+      "revision": "Fetched 2026-08-22: codex exec --ephemeral --json --sandbox read-only, --output-schema, -o/--output-last-message, child-only CODEX_API_KEY, --skip-git-repo-check for non-git workdirs",
+      "purpose": "Codex exec JSONL, output schema, read-only sandbox, ephemeral mode, and invocation-scoped API key"
+    },
+    {
+      "url": "https://github.com/facebookresearch/demucs",
+      "authority": "Meta / Facebook Research",
+      "revision": "Use published package demucs==4.0.1 with required weights htdemucs_6s (drums, bass, guitar, piano, vocals, other). Do not use CLI --two-stems karaoke mode. Four-stem htdemucs is fallback only. Accessed 2026-08-22.",
+      "purpose": "Pinned BeatForge stem separator; analysis.json demucs.requiredModel must be htdemucs_6s"
+    }
+  ]
+}

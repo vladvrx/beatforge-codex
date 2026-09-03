@@ -1,0 +1,4 @@
+interface:
+  display_name: "Beat Saber Mapping"
+  short_description: "Design, author, and review Beat Saber maps"
+  default_prompt: "Use $beat-saber-mapping to plan and build a playable Beat Saber level for this song."

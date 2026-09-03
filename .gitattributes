@@ -1,0 +1,6 @@
+* text=auto
+
+skills/beat-saber-mapping/** text eol=lf
+.codex/skills/beat-saber-mapping/** text eol=lf
+skill-lock.json text eol=lf
+tools/sync_portable_skill.py text eol=lf

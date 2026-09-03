@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#090a0d">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/beat-forge-logo.png" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/beat-forge-logo.png">
+  <title>&#x200b;</title>
+  <style>
+    :root {
+      --bg: #090a0d;
+      --surface: #111318;
+      --raised: #171a20;
+      --line: #2a2e37;
+      --line-strong: #3d4350;
+      --text: #f4f5f7;
+      --muted: #9ca3af;
+      --dim: #6b7280;
+      --red: #ff5c6c;
+      --blue: #5c8cff;
+      --green: #54d69b;
+      --amber: #f1bd66;
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 100% 48px,
+        radial-gradient(800px 420px at 18% -8%, rgba(255,92,108,.12), transparent 70%),
+        radial-gradient(900px 460px at 90% 4%, rgba(92,140,255,.12), transparent 72%),
+        var(--bg);
+      font: 15px/1.5 Inter, ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    }
+    button, input { font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:not([type="file"]):focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .shell { width: min(1240px, calc(100% - 36px)); margin: 0 auto; padding: 24px 0 80px; }
+    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 18px; min-height: 42px; }
+    .system-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .system-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 12px currentColor; }
+    .system-chip.ok::before { background: var(--green); }
+    .hero { margin: 26px 0 18px; }
+    .hero-copy, .panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(24,27,34,.96), rgba(14,16,21,.96)); border-radius: var(--radius); }
+    .hero-copy { padding: clamp(18px, 2.4vw, 28px); min-height: 0; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(300px, 460px); gap: 22px; align-items: center; position: relative; overflow: hidden; }
+    h1 { display: flex; justify-content: center; align-items: center; margin: 0; width: 100%; min-height: clamp(140px, 22vw, 210px); font-size: clamp(38px, 5.2vw, 72px); }
+    .hero-logo { display: grid; place-items: center; width: min(460px, 100%); height: clamp(140px, 22vw, 210px); overflow: hidden; margin: 0 auto;
+      -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%);
+      mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%); }
+    .hero-logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; mix-blend-mode: screen; filter: saturate(1.08) contrast(1.06); }
+    .panel { padding: 22px; }
+    .hero-form { min-width: 0; padding: 0; border: 0; background: transparent; }
+    .hero-form .dropzone { min-height: 88px; padding: 18px 16px; }
+    .workspace { display: grid; gap: 18px; }
+    .stage-deck { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: stretch; }
+    .stage-deck > .panel { min-height: 320px; display: flex; flex-direction: column; }
+    .stage-deck .status-box { flex: 1; }
+    .stage-deck .panel-head h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+    .stack { display: grid; gap: 18px; }
+    .panel h2 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+    .panel-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+    .kicker { color: var(--dim); font: 600 10px ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+    .toggle input { width: auto; accent-color: var(--blue); }
+    .dropzone { position: relative; display: grid; justify-items: center; align-content: center; gap: 4px; min-height: 108px; border: 1px dashed var(--line-strong); border-radius: 14px; padding: 25px 18px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color .18s, background .18s; }
+    .dropzone:hover, .dropzone.over, .dropzone:focus-within { border-color: var(--blue); background: rgba(92,140,255,.055); }
+    .dropzone:focus-within { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .dropzone strong { display: block; color: var(--text); margin: 0; font-weight: 700; }
+    .dropzone-hint { display: block; font-size: 12px; line-height: 1.4; }
+    .dropzone-input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      opacity: 0;
+      cursor: pointer;
+      background: transparent;
+      font-size: 0;
+    }
+    .filename { margin: 10px 2px 0; color: var(--blue); font-size: 12px; overflow-wrap: anywhere; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    label.field { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+    input:not([type="file"]):not([type="checkbox"]), select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; color: var(--text); background: #0b0d11; }
+    textarea { min-height: 76px; resize: vertical; }
+    .spread { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 16px; }
+    .spread button { padding: 7px 3px; border: 1px solid var(--line); border-radius: 8px; color: var(--dim); text-align: center; font: 600 10px ui-monospace, monospace; background: #0b0d11; cursor: pointer; }
+    .spread button[aria-pressed="true"] { color: var(--text); border-color: var(--blue); background: rgba(92,140,255,.12); }
+    .primary { width: 100%; margin-top: 18px; border: 0; border-radius: 11px; padding: 12px 16px; color: #07080a; background: linear-gradient(100deg, var(--red), #f5b1b8 46%, #b3c7ff 55%, var(--blue)); font-weight: 760; cursor: pointer; }
+    .primary:hover:not(:disabled) { filter: brightness(1.07); }
+    button:disabled { opacity: .42; cursor: not-allowed; }
+    .microcopy { margin: 9px 0 0; color: var(--dim); font-size: 11px; }
+    .connectors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .connector { min-height: 160px; border: 1px solid var(--line); border-radius: 14px; background: #0d0f13; padding: 15px; display: flex; flex-direction: column; text-align: left; color: var(--text); }
+    .connector-top { display: flex; align-items: center; gap: 9px; }
+    .connector-logo { width: 24px; height: 24px; object-fit: contain; }
+    .connector h3 { margin: 0; font-size: 14px; }
+    .connector p { flex: 1; margin: 11px 0; color: var(--muted); font-size: 11px; }
+    .connector-actions { display: flex; align-items: center; gap: 8px; }
+    .review-btn, .secondary { border: 1px solid var(--line-strong); background: var(--raised); color: var(--text); border-radius: 8px; padding: 7px 9px; font-size: 11px; cursor: pointer; }
+    .connector a { color: var(--muted); font-size: 10px; text-decoration: none; }
+    .connector a:hover { color: var(--text); }
+    .status-box { min-height: 220px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #0b0d11; }
+    .status-main { padding: 17px; display: flex; gap: 13px; align-items: flex-start; }
+    .status-copy { min-width: 0; flex: 1; }
+    .status-track { margin: 0 0 6px; color: var(--text); font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+    .status-algorithm { display: block; margin: 4px 0 0; color: var(--blue); font: 11px/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+    .status-elapsed { display: block; margin-top: 6px; color: var(--dim); font: 11px ui-monospace, Consolas, monospace; }
+    .decode-meter { display: none; height: 8px; margin-top: 10px; border-radius: 999px; background: #161920; overflow: hidden; border: 1px solid var(--line); }
+    .decode-meter.show { display: block; }
+    .decode-meter span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--red), var(--blue)); }
+    .pulse { width: 11px; height: 11px; border-radius: 50%; background: var(--dim); }
+    .pulse.live { background: var(--blue); box-shadow: 0 0 0 7px rgba(92,140,255,.12); animation: pulse 1.6s ease-in-out infinite; }
+    .pulse.good { background: var(--green); box-shadow: 0 0 0 7px rgba(84,214,155,.11); }
+    .pulse.bad { background: var(--red); box-shadow: 0 0 0 7px rgba(255,92,108,.1); }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 11px rgba(92,140,255,0); } }
+    .status-main strong { display: block; font-size: 13px; }
+    .status-main small { color: var(--muted); }
+    .stage-log { max-height: 420px; overflow: auto; border-top: 1px solid var(--line); padding: 11px 17px; color: var(--dim); font: 11px/1.65 ui-monospace, Consolas, monospace; }
+    .stage-log b { color: var(--muted); }
+    .result-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .metric { border: 1px solid var(--line); border-radius: 11px; padding: 12px; background: #0c0e12; }
+    .metric b { display: block; font-size: 18px; }
+    .metric span { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    .difficulty-list { display: grid; gap: 7px; margin-top: 14px; }
+    .difficulty { display: grid; grid-template-columns: 82px repeat(5, 1fr); gap: 7px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; }
+    .difficulty b { font-size: 12px; }
+    .difficulty span { color: var(--muted); text-align: right; }
+    .notice { padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 12px; }
+    .notice.warn { border-color: rgba(241,189,102,.45); color: #e5c992; }
+    .notice.error { border-color: rgba(255,92,108,.5); color: #ff9daa; }
+    .palette-ai { display: none; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .palette-ai.show { display: flex; }
+    .action-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+    .action-row a, .action-row button { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 9px; padding: 8px 11px; background: var(--raised); color: var(--text); text-decoration: none; font-size: 12px; cursor: pointer; }
+    dialog { width: min(600px, calc(100% - 28px)); border: 1px solid var(--line-strong); border-radius: 16px; padding: 0; color: var(--text); background: #111318; box-shadow: 0 30px 90px rgba(0,0,0,.65); }
+    dialog::backdrop { background: rgba(2,3,5,.78); backdrop-filter: blur(4px); }
+    .modal { padding: 22px; }
+    .modal h2 { margin: 0 0 8px; font-size: 18px; }
+    .modal p { color: var(--muted); font-size: 12px; }
+    .modal-grid { display: grid; gap: 10px; margin: 16px 0; }
+    .consent-meta { border: 1px solid var(--line); border-radius: 10px; padding: 10px; color: var(--muted); font: 11px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; }
+    .check { display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: 12px; }
+    .check input { width: auto; margin-top: 3px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .chip.install { border-color: var(--blue); color: #c5d6ff; }
+    .chip.release { border-color: var(--amber); color: var(--amber); }
+    .chip.release.ready { border-color: var(--green); color: var(--green); }
+    .status-split { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .agent-panel { display: grid; gap: 14px; }
+    .agent-panel .panel-head { margin-bottom: 0; }
+    .agent-panel .panel-head > div { min-width: 0; }
+    .agent-panel .panel-head h2 { margin-top: 3px; }
+    .agent-panel > p { max-width: 850px; margin: 0; color: var(--muted); font-size: 12px; }
+    .agent-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .agent-helper { color: var(--dim); font-size: 11px; }
+    .agent-inspector { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); gap: 12px; }
+    .agent-tools, .agent-activity { min-height: 46px; margin-top: 7px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #0b0d11; }
+    .agent-tools { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
+    .agent-tool { display: inline-flex; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font: 10px ui-monospace, Consolas, monospace; }
+    .agent-activity { max-height: 150px; overflow: auto; color: var(--dim); font: 11px/1.55 ui-monospace, Consolas, monospace; }
+    .agent-activity div + div { margin-top: 5px; }
+    .agent-activity b { color: var(--muted); }
+    .chip.webmcp-ready { border-color: var(--green); color: var(--green); }
+    .chip.webmcp-live { border-color: var(--blue); color: #c5d6ff; }
+    .chip.webmcp-warn { border-color: var(--amber); color: var(--amber); }
+    @media (max-width: 930px) {
+      .hero-copy { grid-template-columns: 1fr; }
+      .stage-deck { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .shell { width: min(100% - 22px, 1240px); padding-top: 12px; }
+      .topbar { flex-wrap: wrap; }
+      .system-chip { width: 100%; }
+      .hero-copy { padding: 18px 16px; }
+      .hero-logo { width: min(360px, 100%); height: 128px; }
+      .panel { padding: 18px; }
+      .field-grid, .connectors, .result-grid, .agent-inspector { grid-template-columns: 1fr; }
+      .connector { min-height: 130px; }
+      .spread { grid-template-columns: repeat(5, minmax(48px, 1fr)); overflow-x: auto; }
+      .difficulty { grid-template-columns: 74px repeat(2, 1fr); }
+      .difficulty span:nth-child(n+4) { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+    @media (prefers-contrast: more) {
+      :root { --line: #c5cad3; --line-strong: #e5e7eb; --text: #ffffff; --muted: #e5e7eb; }
+      button:focus-visible, input:not([type="file"]):focus-visible, select:focus-visible, a:focus-visible { outline-width: 3px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <span class="system-chip" id="gameStatus" role="status">Checking Beat Saber library</span>
+    </header>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">
+          <span class="hero-logo"><img src="/assets/beat-forge-logo.png" alt="BeatForge"></span>
+        </h1>
+        <section class="panel hero-form" aria-labelledby="upload-title">
+        <div class="panel-head">
+          <h2 id="upload-title">Start a mapping run</h2>
+          <label class="toggle" for="advancedSettings">
+            <input id="advancedSettings" type="checkbox" role="switch" aria-checked="false" aria-controls="timingPanel advancedFields">
+            Advanced settings
+          </label>
+        </div>
+        <label class="dropzone" id="drop" for="audioFile">
+          <strong>Drop the mastered track here</strong>
+          <span class="dropzone-hint">MP3, WAV, OGG, FLAC, M4A, or MP4</span>
+          <span class="sr-only">Choose a mastered audio file</span>
+          <input class="dropzone-input" id="audioFile" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.mp4" aria-label="Mastered audio file">
+        </label>
+        <div class="filename" id="filename" aria-live="polite">No track selected</div>
+        <div class="field-grid">
+          <label class="field">Song title<input id="title" autocomplete="off" placeholder="Read from metadata"></label>
+          <label class="field">Artist<input id="artist" autocomplete="off" placeholder="Read from metadata"></label>
+        </div>
+        <div class="field-grid" id="advancedFields" hidden>
+          <label class="field">Mapper credit<input id="mapper" value="BeatForge" autocomplete="off"></label>
+          <label class="field">Deterministic seed<input id="seed" type="number" value="42"></label>
+        </div>
+        <div class="spread" role="group" aria-label="Difficulties to generate">
+          <button type="button" class="diff-toggle" data-difficulty="Easy" aria-pressed="true">Easy</button>
+          <button type="button" class="diff-toggle" data-difficulty="Normal" aria-pressed="true">Normal</button>
+          <button type="button" class="diff-toggle" data-difficulty="Hard" aria-pressed="true">Hard</button>
+          <button type="button" class="diff-toggle" data-difficulty="Expert" aria-pressed="true">Expert</button>
+          <button type="button" class="diff-toggle" data-difficulty="ExpertPlus" aria-pressed="true">Expert+</button>
+        </div>
+        <button class="primary" id="generate">Generate premium map</button>
+        <p class="microcopy">Generate always packs a download. Unverified timing does not block it. The AI timing buttons are an optional check, not a gate. Release candidate is not required to download. BeatForge will not fill either gap silently.</p>
+      </section>
+      </div>
+    </section>
+
+    <section class="panel agent-panel" aria-labelledby="agent-title">
+      <div class="panel-head">
+        <div><span class="kicker">WebMCP collaboration</span><h2 id="agent-title">Work with a mapping agent</h2></div>
+        <span class="chip webmcp-live" id="webmcpStatus">WebMCP checking</span>
+      </div>
+      <p>Give the agent musical intent in plain language. It can apply a typed plan, start the visible run, read safety gates, and record evidence you explicitly supply after playing. The agent never receives your song audio through these tools and never invents a clearance.</p>
+      <label class="field">Creative brief<textarea id="creativeBrief" maxlength="1000" placeholder="e.g. Neon, syncopated, high-energy chorus; keep Expert readable for a first-time player."></textarea></label>
+      <div class="agent-toolbar">
+        <button class="secondary" id="loadDemo" type="button">Load collaboration demo</button>
+        <span class="agent-helper">The demo uses a synthetic 30-second groove and does not create a Beat Saber pack.</span>
+      </div>
+      <div class="agent-inspector">
+        <div><span class="kicker">Exposed tools</span><div class="agent-tools" id="agentTools"><span class="agent-helper">Waiting for WebMCP…</span></div></div>
+        <div><span class="kicker">Activity</span><div class="agent-activity" id="agentActivity" aria-live="polite">Human actions and agent calls will appear here.</div></div>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <div class="stage-deck">
+        <section class="panel" aria-labelledby="run-title">
+          <div class="panel-head"><h2 id="run-title">Run state</h2><span class="kicker" id="jobLabel">No job</span></div>
+          <div class="status-box" aria-live="polite">
+            <div class="status-main"><span class="pulse" id="pulse"></span><div class="status-copy"><p class="status-track" id="statusTrack">No track loaded</p><strong id="statusTitle">Waiting for a track</strong><small class="status-algorithm" id="statusAlgorithm">Idle</small><small id="statusDetail">The official-premium pipeline has not started.</small><small class="status-elapsed" id="statusElapsed"></small><small id="statusDecode"></small><div class="decode-meter" id="decodeMeter" aria-hidden="true"><span id="decodeFill"></span></div></div></div>
+            <div class="stage-log" id="stageLog">No events yet.</div>
+          </div>
+          <div class="timing-ai" id="timingAi" hidden>
+            <p class="microcopy">Timing models did not fully agree. Download is still available. You can ask OpenAI Codex to review the grid. Song audio is not sent.</p>
+            <div class="palette-ai show" aria-label="OpenAI Codex timing review">
+              <button class="secondary timing-ai-btn" type="button" data-provider="codex">Ask Codex</button>
+              <button class="secondary" id="downloadAnyway" type="button">Install to Beat Saber anyway</button>
+            </div>
+          </div>
+          <div class="action-row" id="outputActions" hidden>
+            <a id="download" href="#">Save ZIP copy</a>
+            <button id="install">Install to Beat Saber CustomLevels</button>
+            <button id="launchGame">Launch Beat Saber</button>
+            <button id="showQa">Open QA findings</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel" aria-labelledby="timing-title" id="timingPanel" hidden>
+          <div class="panel-head"><h2 id="timing-title">Timing</h2><span class="kicker">Integer samples · 44.1 kHz</span></div>
+          <div class="notice" id="timingNotice">A verified beat grid will appear here. Premium thresholds are 10 ms median and 20 ms at the 95th percentile.</div>
+          <audio id="clickTrack" controls hidden aria-label="Click track for timing confirmation"></audio>
+          <form id="anchorForm" hidden>
+            <div class="field-grid" id="anchorFields"></div>
+            <button class="secondary" type="submit">Confirm anchors and refit</button>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="output-title">
+          <div class="panel-head"><h2 id="output-title">Five-difficulty output</h2><span class="kicker">Vanilla v3.3</span></div>
+          <div class="result-grid" id="resultMetrics"><div class="metric"><b>5</b><span>Independent maps</span></div><div class="metric"><b>0</b><span>Hard failures allowed</span></div><div class="metric"><b>VR</b><span>Final release gate</span></div></div>
+          <div class="difficulty-list" id="difficultyList"><div class="notice">Object counts appear after local validation.</div></div>
+          <div class="status-split" id="installRelease" hidden>
+            <span class="chip" id="installChip">CustomLevels: not installed this session</span>
+            <span class="chip release" id="releaseChip">Release: not a candidate (headset + review still required)</span>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="playtest-title" id="playtestPanel" hidden>
+          <div class="panel-head"><h2 id="playtest-title">Headset evidence</h2><span class="kicker">Human only</span></div>
+          <p class="microcopy">BeatForge cannot play or clear a map. Record headset passes for your own notes. The studio will not stamp release_candidate; that exists only when a map is routed through the independent AI review path.</p>
+          <form id="playtestForm">
+            <div class="field-grid">
+              <label class="field">Difficulty
+                <select id="playtestDifficulty" aria-label="Playtest difficulty">
+                  <option>Easy</option>
+                  <option>Normal</option>
+                  <option>Hard</option>
+                  <option>Expert</option>
+                  <option>ExpertPlus</option>
+                </select>
+              </label>
+              <label class="field">Speed
+                <select id="playtestSpeed" aria-label="Playtest speed">
+                  <option value="full">Full</option>
+                  <option value="slow">Slow</option>
+                </select>
+              </label>
+              <label class="field">Tester name<input id="playtestTester" required maxlength="120" autocomplete="nickname"></label>
+              <label class="field">Notes<input id="playtestNotes" maxlength="2000"></label>
+            </div>
+            <label class="check"><input id="playtestPassed" type="checkbox" checked> This pass cleared</label>
+            <label class="check"><input id="playtestFresh" type="checkbox"> Separate tester fresh sight-read</label>
+            <div class="action-row">
+              <button class="secondary" type="submit">Record headset pass</button>
+            </div>
+          </form>
+          <div class="notice" id="playtestGate">No headset evidence recorded. release_candidate is disabled in this studio.</div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="providerDialog"><form class="modal" method="dialog" id="providerForm"><h2 id="providerName">Provider setup</h2><p>The API key goes to Windows Credential Manager. BeatForge never returns it to this page or writes it to a file.</p><div class="modal-grid"><label class="field">API key<input id="providerKey" type="password" autocomplete="off"></label><label class="field">Model<input id="providerModel" autocomplete="off"></label><label class="field">Maximum review cost, USD<input id="providerBudget" type="number" min="0.01" max="500" step="0.01" value="5.00"></label></div><div class="modal-actions"><button class="secondary" value="cancel">Cancel</button><button class="primary" id="saveProvider" value="default">Save setup</button></div></form></dialog>
+  <dialog id="reportDialog"><div class="modal"><h2 id="reportTitle">QA report</h2><div class="consent-meta" id="reportBody"></div><div class="modal-actions"><button class="secondary" onclick="this.closest('dialog').close()">Close</button></div></div></dialog>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    let audioFile = null;
+    let jobId = null;
+    let currentProvider = null;
+    let pendingProviderAction = 'timing';
+    let lastJob = null;
+    let installedPath = null;
+    let elapsedTimer = null;
+    let runStartedAt = null;
+    let demoMode = false;
+    let demoEvidence = [];
+    let agentActivity = [];
+    let webmcpStatus = 'checking';
+
+    function formatElapsed(seconds) {
+      const value = Math.max(0, Number(seconds) || 0);
+      const minutes = Math.floor(value / 60);
+      const rest = value - minutes * 60;
+      return minutes ? `${minutes}m ${rest.toFixed(1)}s elapsed` : `${rest.toFixed(1)}s elapsed`;
+    }
+    function stopElapsedClock() {
+      if (elapsedTimer) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+    }
+    function tickElapsed() {
+      if (!runStartedAt) return;
+      $('statusElapsed').textContent = formatElapsed((Date.now() / 1000) - runStartedAt);
+    }
+    function startElapsedClock(startedAt) {
+      if (startedAt) runStartedAt = Number(startedAt);
+      else if (!runStartedAt) runStartedAt = Date.now() / 1000;
+      tickElapsed();
+      if (!elapsedTimer) elapsedTimer = setInterval(tickElapsed, 200);
+    }
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, options);
+      const raw = await response.text();
+      let payload = {};
+      try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = { detail: raw }; }
+      if (!response.ok) throw new Error(payload.detail || `Request failed with ${response.status}`);
+      return payload;
+    }
+
+    function recordAgentActivity(entry) {
+      const detail = typeof entry.detail === 'string' ? entry.detail : JSON.stringify(entry.detail || '');
+      agentActivity = [...agentActivity, { at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), label: entry.label || entry.kind || 'Activity', detail }].slice(-8);
+      const target = $('agentActivity');
+      if (target) target.innerHTML = agentActivity.map(item => `<div><b>${escapeHtml(item.at)} · ${escapeHtml(item.label)}</b><br>${escapeHtml(item.detail)}</div>`).join('');
+    }
+
+    function setWebMcpStatus(status, detail, tools = []) {
+      webmcpStatus = status;
+      const label = { checking: 'WebMCP checking', registering: 'WebMCP registering', ready: 'WebMCP ready', partial: 'WebMCP partial', unsupported: 'WebMCP unavailable', error: 'WebMCP error' }[status] || `WebMCP ${status}`;
+      const target = $('webmcpStatus');
+      if (target) {
+        target.textContent = label;
+        target.title = detail || '';
+        target.className = `chip ${status === 'ready' ? 'webmcp-ready' : ['registering', 'partial'].includes(status) ? 'webmcp-live' : 'webmcp-warn'}`;
+      }
+      const toolTarget = $('agentTools');
+      if (toolTarget && tools.length) toolTarget.innerHTML = tools.map(tool => `<span class="agent-tool" title="${escapeHtml(tool.description)}">${escapeHtml(tool.name)}</span>`).join('');
+      if (detail && status !== 'checking') recordAgentActivity({ kind: 'system', label, detail });
+    }
+
+    function applyAdvanced() {
+      const on = $('advancedSettings').checked;
+      $('advancedSettings').setAttribute('aria-checked', String(on));
+      $('timingPanel').hidden = !on;
+      $('advancedFields').hidden = !on;
+      const waiting = lastJob && (
+        lastJob.timingVerified === false
+        || lastJob.status === 'needs_anchors'
+        || lastJob.localStatus === 'unconfirmed_pack'
+      );
+      $('timingAi').hidden = !(waiting && !on);
+    }
+    $('advancedSettings').addEventListener('change', applyAdvanced);
+    applyAdvanced();
+
+    api('/api/beat-saber/status').then(data => {
+      $('gameStatus').textContent = data.found ? 'Beat Saber library connected' : 'Beat Saber library not found';
+      $('gameStatus').classList.toggle('ok', data.found);
+    }).catch(() => { $('gameStatus').textContent = 'Beat Saber check unavailable'; });
+
+    const drop = $('drop');
+    drop.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('over'); if (event.dataTransfer.files[0]) selectFile(event.dataTransfer.files[0]); });
+    $('audioFile').addEventListener('change', event => { if (event.target.files[0]) selectFile(event.target.files[0]); });
+    function selectFile(file) { demoMode = false; audioFile = file; $('filename').textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`; if (!$('title').value) $('title').value = file.name.replace(/\.[^.]+$/, ''); recordAgentActivity({ kind: 'human', label: 'Human loaded mastered audio', detail: file.name }); }
+
+    function selectedDifficulties() {
+      return [...document.querySelectorAll('.diff-toggle[aria-pressed="true"]')].map(button => button.dataset.difficulty);
+    }
+    function currentMappingPlan() {
+      return { title: $('title').value.trim(), artist: $('artist').value.trim(), mapper: $('mapper').value.trim() || 'BeatForge', seed: Number($('seed').value || 42), difficulties: selectedDifficulties(), creativeBrief: $('creativeBrief').value.trim() };
+    }
+    function applyMappingPlan(plan = {}) {
+      const allowed = new Set(['Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus']);
+      if (plan.title != null) $('title').value = String(plan.title).slice(0, 200);
+      if (plan.artist != null) $('artist').value = String(plan.artist).slice(0, 200);
+      if (plan.mapper != null) $('mapper').value = String(plan.mapper).slice(0, 120);
+      if (plan.seed != null && Number.isInteger(Number(plan.seed))) $('seed').value = String(Number(plan.seed));
+      if (plan.creativeBrief != null) $('creativeBrief').value = String(plan.creativeBrief).slice(0, 1000);
+      if (plan.difficulties != null) {
+        const chosen = [...new Set(plan.difficulties)].filter(name => allowed.has(name));
+        if (!chosen.length) throw new Error('Choose at least one supported difficulty');
+        document.querySelectorAll('.diff-toggle').forEach(button => button.setAttribute('aria-pressed', String(chosen.includes(button.dataset.difficulty))));
+      }
+      const state = getStudioState({ includeActivity: true });
+      setState('Mapping plan updated', 'Review the visible plan, then ask the agent to generate when ready.', 'good', { algorithm: 'webmcp · plan' });
+      return state;
+    }
+    function getStudioState(options = {}) {
+      const job = lastJob ? {
+        id: lastJob.id,
+        demo: Boolean(lastJob.demo),
+        status: lastJob.status,
+        localStatus: lastJob.localStatus || null,
+        timingVerified: lastJob.timingVerified ?? null,
+        title: lastJob.title,
+        artist: lastJob.artist,
+        difficulties: lastJob.difficulties || [],
+        summary: lastJob.summary || null,
+        qa: lastJob.qa || null,
+        releaseGate: lastJob.releaseGate || null,
+      } : null;
+      const nextActions = job ? (job.status === 'playtest_candidate' ? ['Play the generated chart in a headset', 'Record the human pass with record_human_playtest'] : ['Inspect the current run state']) : (audioFile ? ['Apply a mapping plan', 'Generate a BeatForge map'] : ['Upload mastered audio or load_collaboration_demo']);
+      const state = { app: 'BeatForge Studio', mode: demoMode ? 'rights-safe-demo' : 'local-audio', webmcp: webmcpStatus, audioReady: Boolean(audioFile), track: audioFile ? { name: audioFile.name, sizeBytes: audioFile.size || null, demo: Boolean(audioFile.demo) } : null, mappingPlan: currentMappingPlan(), job, nextActions };
+      if (options.includeActivity) state.activity = agentActivity.slice(-8);
+      return state;
+    }
+    function demoSummary(difficulties) {
+      const counts = { Easy: [48, 6, 0, 0, 0], Normal: [72, 10, 2, 0, 0], Hard: [118, 20, 4, 2, 0], Expert: [176, 34, 8, 3, 2], ExpertPlus: [238, 52, 14, 6, 4] };
+      return Object.fromEntries(difficulties.map(name => { const [notes, arcs, chains, bombs, walls] = counts[name]; return [name, { notes, arcs, chains, bombs, walls }]; }));
+    }
+    function buildDemoJob() {
+      const plan = currentMappingPlan();
+      return { id: jobId || `demo-${Date.now().toString(36)}`, demo: true, status: 'playtest_candidate', localStatus: 'playtest_candidate', title: plan.title || 'Neon Rain', artist: plan.artist || 'BeatForge Demo', mapper: plan.mapper, seed: plan.seed, difficulties: plan.difficulties, stage: 'ready', detail: 'Rights-safe browser preview generated from the shared mapping plan.', elapsed: 0.3, timingVerified: true, summary: { difficulties: demoSummary(plan.difficulties) }, qa: { status: 'pass', errors: 0, warnings: 0 }, releaseGate: { localHardGates: true, providerReview: false, noExternalFindings: false, aiReleaseRoute: false, allFiveFullSpeed: false, expertSlow: false, separateFreshSightRead: false, evidenceCount: demoEvidence.length }, stages: [{ stage: 'brief', detail: plan.creativeBrief || 'No creative brief supplied.' }, { stage: 'plan', detail: `${plan.difficulties.length} difficulty maps selected with deterministic seed ${plan.seed}.` }, { stage: 'ready', detail: 'Preview is ready for human review; no headset clearance is implied.' }] };
+    }
+    function loadDemoSession() {
+      demoMode = true;
+      demoEvidence = [];
+      audioFile = { name: 'neon-rain-demo.wav', size: 3145728, type: 'audio/wav', demo: true };
+      $('title').value = 'Neon Rain';
+      $('artist').value = 'BeatForge Demo';
+      $('mapper').value = 'BeatForge + human/agent session';
+      $('seed').value = '42';
+      $('creativeBrief').value = 'Neon, syncopated, high-energy chorus; keep Expert readable for a first-time player.';
+      document.querySelectorAll('.diff-toggle').forEach(button => button.setAttribute('aria-pressed', 'true'));
+      $('filename').textContent = 'neon-rain-demo.wav · synthetic 30-second groove';
+      jobId = null;
+      lastJob = null;
+      $('outputActions').hidden = true;
+      $('playtestPanel').hidden = true;
+      setState('Demo track ready', 'The synthetic groove is loaded. Ask an agent to refine the brief or generate a preview.', 'good', { algorithm: 'webmcp · rights-safe demo' });
+      recordAgentActivity({ kind: 'human', label: 'Human loaded collaboration demo', detail: 'Synthetic 30-second groove; no copyrighted audio or pack is created.' });
+      return getStudioState({ includeActivity: true });
+    }
+    async function startGeneration({ source = 'human', reason = '' } = {}) {
+      if (demoMode) {
+        if (!selectedDifficulties().length) throw new Error('Select at least one difficulty');
+        $('generate').disabled = true;
+        setState('Composing browser preview', reason || 'Applying the shared human-agent mapping plan.', 'live', { algorithm: 'webmcp · preview' });
+        await new Promise(resolve => setTimeout(resolve, 180));
+        const job = buildDemoJob();
+        jobId = job.id;
+        renderJob(job);
+        $('generate').disabled = false;
+        return { ok: true, mode: 'rights-safe-demo', id: job.id, status: job.status, summary: job.summary, humanNextAction: 'Play or discuss the preview, then record only real human evidence.' };
+      }
+      if (!audioFile) return setState('Select a mastered audio file first.', 'The mapper cannot run without local audio.', 'bad'), { ok: false, error: 'Select a mastered audio file first.' };
+      const chosen = selectedDifficulties();
+      if (!chosen.length) {
+        const error = new Error('Select at least one difficulty');
+        if (source === 'human') { setState(error.message, 'Toggle Easy through Expert+ before generating.', 'bad'); return { ok: false, error: error.message }; }
+        throw error;
+      }
+      const form = new FormData();
+      form.append('audio', audioFile);
+      form.append('title', $('title').value);
+      form.append('artist', $('artist').value);
+      form.append('mapper', $('mapper').value);
+      form.append('seed', $('seed').value || '42');
+      form.append('difficulties', chosen.join(','));
+      $('generate').disabled = true;
+      const trackName = [$('title').value, $('artist').value].filter(Boolean).join(' · ') || audioFile.name;
+      $('statusTrack').textContent = trackName;
+      startElapsedClock(Date.now() / 1000);
+      $('statusDecode').textContent = '';
+      $('decodeMeter').classList.remove('show');
+      setState('Uploading local audio', reason || 'Starting the official-premium pipeline.', 'live', { algorithm: source === 'agent' ? 'webmcp · upload' : 'pipeline · upload' });
+      try {
+        const result = await api('/api/generate', { method: 'POST', body: form });
+        jobId = result.id;
+        $('jobLabel').textContent = `Job ${jobId}`;
+        streamJob();
+        return { ok: true, id: jobId, status: result.status, humanNextAction: 'Wait for the safety-gated run, then review the result.' };
+      } catch (error) {
+        setState('Generation could not start', error.message, 'bad');
+        $('generate').disabled = false;
+        if (source === 'agent') throw error;
+        return { ok: false, error: error.message };
+      }
+    }
+    document.querySelectorAll('.diff-toggle').forEach(button => {
+      button.addEventListener('click', () => {
+        const on = button.getAttribute('aria-pressed') !== 'true';
+        if (!on && selectedDifficulties().length === 1) return setState('Keep at least one difficulty', 'The mapper needs a Standard chart to generate.', 'bad');
+        button.setAttribute('aria-pressed', String(on));
+      });
+    });
+    $('generate').addEventListener('click', () => startGeneration({ source: 'human' }));
+    $('loadDemo').addEventListener('click', loadDemoSession);
+
+    function streamJob() {
+      const stream = new EventSource(`/api/jobs/${jobId}/events`);
+      stream.addEventListener('progress', event => renderJob(JSON.parse(event.data)));
+      stream.addEventListener('end', () => stream.close());
+      stream.onerror = async () => { stream.close(); try { renderJob(await api(`/api/jobs/${jobId}`)); } catch {} };
+    }
+
+    function renderJob(job) {
+      lastJob = job;
+      const live = ['queued','running','validating'].includes(job.status);
+      const failed = ['error','invalid','corpus_incomplete'].includes(job.status);
+      const track = [job.title, job.artist].filter(Boolean).join(' · ') || 'Unknown track';
+      $('statusTrack').textContent = track;
+      const stage = job.stage || job.status;
+      const detail = job.detail || job.error || gateDetail(job.status);
+      const headline = live ? stage : statusLabel(job.status);
+      const algorithm = live
+        ? `official-premium · ${stage}`
+        : (job.stage ? `${job.status} · last stage ${job.stage}` : job.status);
+      setState(headline, detail, live ? 'live' : failed ? 'bad' : 'good', { algorithm });
+      if (live) startElapsedClock(job.startedAt);
+      else {
+        stopElapsedClock();
+        const seconds = job.elapsed != null ? Number(job.elapsed) : (job.startedAt ? (Date.now() / 1000) - Number(job.startedAt) : null);
+        $('statusElapsed').textContent = seconds == null ? '' : formatElapsed(seconds);
+      }
+      const percent = job.decodePercent;
+      if (percent == null || percent === '') {
+        if (!live) {
+          $('statusDecode').textContent = '';
+          $('decodeMeter').classList.remove('show');
+        }
+      } else {
+        const value = Math.max(0, Math.min(100, Number(percent)));
+        $('statusDecode').textContent = `Decoded ${value.toFixed(0)}%`;
+        $('decodeMeter').classList.add('show');
+        $('decodeFill').style.width = `${value}%`;
+        $('decodeMeter').setAttribute('aria-hidden', 'false');
+      }
+      const stages = job.stages || [];
+      $('stageLog').innerHTML = stages.map(entry => `<div><b>${escapeHtml(entry.stage)}</b> ${escapeHtml(entry.detail || '')}</div>`).join('') || 'No events yet.';
+      $('stageLog').scrollTop = $('stageLog').scrollHeight;
+      $('generate').disabled = live;
+      if (job.status === 'needs_anchors') showAnchors(job);
+      applyAdvanced();
+      if (job.localStatus === 'playtest_candidate' || job.localStatus === 'unconfirmed_pack') {
+        showOutput(job);
+      }
+    }
+
+    function statusLabel(status) {
+      return ({queued:'Queued',running:'Analyzing and generating',validating:'Running hard gates',needs_anchors:'Timing anchors required',needs_palette:'Artwork or palette approval required',corpus_incomplete:'Official corpus is incomplete',invalid:'Local hard gate failed',error:'Pipeline error',review_required:'Ready for Codex review',playtest_candidate:'Locally validated playtest candidate',studio_reviewed:'Codex review passed',release_candidate:'Release candidate'})[status] || status;
+    }
+    function gateDetail(status) {
+      return ({needs_anchors:'The timing models did not meet the premium residual threshold.',needs_palette:'BeatForge will not invent map colors without a readable approved pair.',review_required:'Local validation passed. Prepare one exact Codex review bundle.',studio_reviewed:'Codex review passed. Headset evidence remains.',release_candidate:'All software, Codex, and recorded human gates passed.'})[status] || '';
+    }
+    function setState(title, detail, kind, extra = {}) {
+      $('statusTitle').textContent = title;
+      $('statusDetail').textContent = detail;
+      $('pulse').className = `pulse ${kind || ''}`;
+      if (extra.algorithm != null) $('statusAlgorithm').textContent = extra.algorithm;
+    }
+
+    function showAnchors(job) {
+      const residuals = job.pipeline?.residuals || {};
+      const median = residuals.medianMs == null ? 'n/a' : Number(residuals.medianMs).toFixed(1);
+      const p95 = residuals.p95Ms == null ? 'n/a' : Number(residuals.p95Ms).toFixed(1);
+      $('timingNotice').className = 'notice warn';
+      $('timingNotice').textContent = `The ensemble did not meet median ≤ 10 ms / p95 ≤ 20 ms (measured median ${median} ms, p95 ${p95} ms). Listen to the click track at the start, middle, and end. Prefills come from the unconfirmed grid — correct them before confirming.`;
+      const click = $('clickTrack');
+      click.hidden = false;
+      click.src = `/api/jobs/${job.id}/click-track`;
+      const checkpoints = job.pipeline?.clickTrackEvidence?.checkpoints || [];
+      const suggestions = job.pipeline?.suggestions || [];
+      const rows = checkpoints.length ? checkpoints : suggestions;
+      const defaults = rows.length ? rows : [{label:'start',beat:'',nearTimeSeconds:0},{label:'middle',beat:'',nearTimeSeconds:60},{label:'end',beat:'',nearTimeSeconds:120}];
+      $('anchorFields').innerHTML = defaults.map((item, index) => {
+        const beat = item.suggestedBeat ?? item.beat ?? '';
+        const time = item.timeSeconds ?? item.nearTimeSeconds ?? 0;
+        const label = item.label || item.purpose || `Anchor ${index + 1}`;
+        return `<label class="field">${escapeHtml(String(label))} beat<input name="beat" type="number" step="0.25" value="${beat === '' ? '' : Number(beat)}" required></label><label class="field">${escapeHtml(String(label))} time (s)<input name="time" type="number" step="0.000001" value="${Number(time).toFixed(6)}" required></label>`;
+      }).join('');
+      $('anchorForm').hidden = false;
+    }
+    document.querySelectorAll('.timing-ai-btn').forEach(button => button.addEventListener('click', () => suggestTiming(button.dataset.provider)));
+    async function suggestTiming(provider) {
+      currentProvider = provider;
+      pendingProviderAction = 'timing';
+      try {
+        const settings = await api(`/api/settings/providers/${provider}`);
+        if (!settings.configured || !settings.runnerInstalled) return openProviderSetup(provider, settings);
+        if (!confirm(`${settings.label} will receive the local analysis summary, click-track sample checkpoints, and tracker beat lists. The song audio stays local. Continue?`)) return;
+        setState(`${settings.label} is proposing timing anchors`, 'Song audio is not sent for this step.', 'live');
+        await api(`/api/jobs/${jobId}/anchors/suggest/${provider}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({analysisApproved:true})});
+        $('timingAi').hidden = true;
+        streamJob();
+      } catch (error) { setState('Timing proposal failed', error.message, 'bad'); }
+    }
+    $('downloadAnyway').addEventListener('click', async () => {
+      if (!jobId) return setState('No job to download', 'Generate a map first.', 'bad');
+      try {
+        setState('Installing unconfirmed pack', 'Using the unconfirmed grid, then copying into CustomLevels. Timing stays unverified.', 'live');
+        await api(`/api/jobs/${jobId}/continue-unconfirmed`, {method:'POST'});
+        $('timingAi').hidden = true;
+        streamJob();
+      } catch (error) { setState('Unconfirmed download failed', error.message, 'bad'); }
+    });
+    $('anchorForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const beats = [...event.target.querySelectorAll('[name=beat]')];
+      const times = [...event.target.querySelectorAll('[name=time]')];
+      const anchors = beats.map((input, index) => ({ beat: Number(input.value), timeSeconds: Number(times[index].value), kind: index === 0 ? 'downbeat' : 'beat' }));
+      try { await api(`/api/jobs/${jobId}/anchors`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anchors}) }); $('anchorForm').hidden = true; streamJob(); }
+      catch (error) { setState('Anchor refit rejected', error.message, 'bad'); }
+    });
+
+    function showOutput(job) {
+      $('outputActions').hidden = false;
+      $('playtestPanel').hidden = false;
+      const demo = Boolean(job.demo);
+      if (demo) {
+        $('download').removeAttribute('href');
+        $('download').textContent = 'Browser preview · no ZIP';
+        $('download').setAttribute('aria-disabled', 'true');
+      } else {
+        $('download').href = `/api/jobs/${jobId}/download`;
+        $('download').textContent = 'Save ZIP copy';
+        $('download').removeAttribute('aria-disabled');
+      }
+      if (job.customLevelsPath || job.sourcePath) installedPath = job.customLevelsPath || job.sourcePath;
+      $('install').hidden = demo || !['playtest_candidate', 'unconfirmed_pack'].includes(job.localStatus);
+      $('launchGame').hidden = demo;
+      $('showQa').textContent = demo ? 'Open preview QA' : 'Open QA findings';
+      const maps = job.summary?.difficulties || {};
+      const count = Object.keys(maps).length || (job.difficulties || []).length || 0;
+      $('resultMetrics').innerHTML = `<div class="metric"><b>${count}</b><span>Independent maps</span></div><div class="metric"><b>0</b><span>Hard failures allowed</span></div><div class="metric"><b>VR</b><span>Headset notes only</span></div>`;
+      const playtestNames = job.difficulties || Object.keys(maps);
+      if (playtestNames.length) {
+        $('playtestDifficulty').innerHTML = playtestNames.map(name => `<option>${escapeHtml(name)}</option>`).join('');
+      }
+      $('difficultyList').innerHTML = Object.entries(maps).map(([name, count]) => `<div class="difficulty"><b>${escapeHtml(name)}</b><span>${count.notes} notes</span><span>${count.arcs} arcs</span><span>${count.chains} chains</span><span>${count.bombs} bombs</span><span>${count.walls} walls</span></div>`).join('');
+      renderPlaytestGate(job.releaseGate);
+      renderInstallRelease(job);
+    }
+    function renderInstallRelease(job) {
+      $('installRelease').hidden = false;
+      $('installChip').textContent = installedPath ? `CustomLevels: ${installedPath}` : 'CustomLevels: not installed this session';
+      $('installChip').classList.toggle('install', Boolean(installedPath));
+      const aiRoute = Boolean(job.releaseGate && job.releaseGate.aiReleaseRoute);
+      const release = aiRoute && job.status === 'release_candidate';
+      $('releaseChip').textContent = release
+        ? 'Release: candidate (AI review route)'
+        : 'Release: disabled until AI review routing is turned on';
+      $('releaseChip').classList.toggle('ready', release);
+    }
+    $('playtestForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        const result = await recordPlaytest({
+          difficulty: $('playtestDifficulty').value,
+          speed: $('playtestSpeed').value,
+          passed: $('playtestPassed').checked,
+          tester: $('playtestTester').value,
+          freshSightRead: $('playtestFresh').checked,
+          notes: $('playtestNotes').value,
+        });
+        renderPlaytestGate(result.releaseGate);
+        setState(statusLabel(result.status), 'Headset pass recorded. Software did not play the map and did not stamp release_candidate.', 'good');
+      } catch (error) {
+        setState('Headset evidence not saved', error.message, 'bad');
+      }
+    });
+    function renderPlaytestGate(gate) {
+      if (!gate) return;
+      const bits = [
+        gate.allFiveFullSpeed ? 'all five full-speed recorded' : 'missing full-speed clears',
+        gate.expertSlow ? 'Expert and Expert+ slow recorded' : 'missing slow Expert/Expert+',
+        gate.separateFreshSightRead ? 'separate sight-read recorded' : 'missing separate sight-read',
+      ];
+      $('playtestGate').textContent = `Recorded passes: ${gate.evidenceCount || 0}. ${bits.join('; ')}. Studio ceiling is playtest / studio review; release_candidate stays off.`;
+    }
+    async function reviewCurrentMap(options = {}) {
+      if (!lastJob) return getStudioState({ includeActivity: options.detail === 'full' });
+      let qa = lastJob.qa || null;
+      if (!demoMode && jobId) {
+        try { qa = await api(`/api/jobs/${jobId}/critic`); } catch (error) { qa = { status: 'unavailable', detail: error.message }; }
+      }
+      const state = getStudioState({ includeActivity: options.detail === 'full' });
+      return { ...state, review: { qa, safety: 'Human headset evidence is still required; this review does not certify playability.' } };
+    }
+    async function recordPlaytest(input = {}) {
+      if (!lastJob || !jobId) throw new Error('Generate a map before recording playtest evidence');
+      const difficulty = String(input.difficulty || '');
+      const speed = String(input.speed || '');
+      const tester = String(input.tester || '').trim();
+      if (!['Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus'].includes(difficulty)) throw new Error('Unknown difficulty');
+      if (!['slow', 'full'].includes(speed)) throw new Error('Speed must be slow or full');
+      if (!tester) throw new Error('A human tester name is required');
+      const evidence = { difficulty, speed, passed: Boolean(input.passed), tester, freshSightRead: Boolean(input.freshSightRead), notes: String(input.notes || '').slice(0, 2000) };
+      if (demoMode || lastJob.demo) {
+        demoEvidence = [...demoEvidence, { ...evidence, recordedAt: new Date().toISOString() }];
+        const job = buildDemoJob();
+        job.id = jobId;
+        renderJob(job);
+        return { status: job.status, releaseGate: job.releaseGate, evidence: demoEvidence, mode: 'rights-safe-demo' };
+      }
+      if (lastJob.localStatus !== 'playtest_candidate') throw new Error('Install and validate a playtest candidate first');
+      const result = await api(`/api/jobs/${jobId}/playtests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(evidence) });
+      renderJob(await api(`/api/jobs/${jobId}`));
+      return result;
+    }
+    $('install').addEventListener('click', async () => {
+      try {
+        if (lastJob && lastJob.imported && installedPath) {
+          setState('Already in CustomLevels', installedPath, 'good');
+          renderInstallRelease(lastJob);
+          return;
+        }
+        const result = await api(`/api/jobs/${jobId}/install`, {method:'POST'});
+        installedPath = result.path;
+        if (lastJob) renderInstallRelease(lastJob);
+        setState('Installed for human playtest', result.path, 'good');
+      } catch (error) {
+        setState('Install failed', error.message, 'bad');
+      }
+    });
+    $('launchGame').addEventListener('click', async () => { try { const result = await api(`/api/jobs/${jobId}/launch`, {method:'POST'}); setState('Beat Saber started', result.message, 'good'); } catch (error) { setState('Launch failed', error.message, 'bad'); } });
+    $('showQa').addEventListener('click', async () => { try { const report = await api(`/api/jobs/${jobId}/critic`); showReport('Local QA report', report); } catch (error) { setState('QA report unavailable', error.message, 'bad'); } });
+
+    function openProviderSetup(provider, settings) { $('providerName').textContent = `${settings.label || 'OpenAI Codex'} setup`; $('providerModel').value = settings.model || 'gpt-5.6-codex'; $('providerBudget').value = settings.maximumCostUsd || 5; $('providerKey').value = ''; $('providerDialog').showModal(); }
+    $('providerForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      if (event.submitter?.value === 'cancel') return $('providerDialog').close();
+      try {
+        const payload = {apiKey:$('providerKey').value || null,model:$('providerModel').value,maximumCostUsd:Number($('providerBudget').value)};
+        const status = await api(`/api/settings/providers/${currentProvider}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        $('providerKey').value = '';
+        $('providerDialog').close();
+        if (!status.runnerInstalled) throw new Error(`${status.label} runner is not installed on this PC.`);
+        if (pendingProviderAction === 'timing') suggestTiming(currentProvider);
+      } catch (error) { setState('Provider setup failed', error.message, 'bad'); }
+    });
+    function showReport(title, report) { $('reportTitle').textContent = title; $('reportBody').textContent = JSON.stringify(report, null, 2); $('reportDialog').showModal(); }
+    window.BeatForgeApp = { getStudioState, applyMappingPlan, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
+  </script>
+  <script src="/web/webmcp.js"></script>
+</body>
+</html>

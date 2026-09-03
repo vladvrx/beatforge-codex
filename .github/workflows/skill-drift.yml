@@ -1,0 +1,38 @@
+name: Skill drift
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  verify-portable-skill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/sync_portable_skill.py
+
+  app-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests -q -m "not network and not hardware and not codex"
+
+  skill-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest==8.4.2 numpy==2.3.5 ortools==9.15.6755 Pillow==11.3.0 mutagen==1.47.0 soundfile==0.13.1
+      - run: python -m pytest skills/beat-saber-mapping/tests -q -m "not corpus"
+        env:
+          PYTHONPATH: skills/beat-saber-mapping/scripts
