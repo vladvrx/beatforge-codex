@@ -51,6 +51,6 @@ We also learned that agents need application state, not a larger scrape of the p
 
 ## What's next for BeatForge for Beatsaber
 
-The immediate next step is a public deployment and a real WebMCP-enabled browser run. After that, we want agents to compare two mapping plans, explain why a generated section failed a gate, and turn human headset notes into structured revision requests. We also want to keep more audio analysis local while sharing only the summaries needed for collaboration.
+The public challenge build is now deployed at `https://vladvrx.github.io/beatforge-codex/` and has been verified in a WebMCP-capable in-app browser. Next, we want agents to compare two mapping plans, explain why a generated section failed a gate, and turn human headset notes into structured revision requests. We also want to keep more audio analysis local while sharing only the summaries needed for collaboration.
 
 Longer term, BeatForge should feel less like a generator and more like a rehearsal partner. The person brings taste and embodied knowledge. The agent keeps track of decisions, surfaces tradeoffs, and helps turn a musical idea into a chart that a person can actually play.
