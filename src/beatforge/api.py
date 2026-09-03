@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -31,12 +31,14 @@ from beatforge.providers import (
     suggest_mood_palette,
     suggest_timing_anchors,
 )
+from beatforge.song_metadata import SongMetadataNotFound, search_song_metadata
 
 
 WEB_INDEX = ROOT / "web" / "index.html"
 JOBS_DIR = ROOT / "data" / "jobs"
 IMPORTS_DIR = ROOT / "data" / "imports"
 SETTINGS_FILE = ROOT / "data" / "provider-settings.json"
+METADATA_DIR = ROOT / "data" / "metadata"
 JOB_TTL_SECONDS = 24 * 3600
 STUDIO_STATES = (
     "needs_anchors",
@@ -222,6 +224,45 @@ def _cleanup_old_jobs(max_age: float = JOB_TTL_SECONDS) -> int:
     return removed
 
 
+def _metadata_manifest_path(metadata_id: str) -> Path:
+    if not metadata_id or not metadata_id.isalnum() or len(metadata_id) != 20:
+        raise HTTPException(400, "Invalid song metadata id")
+    path = (METADATA_DIR / f"{metadata_id}.json").resolve()
+    try:
+        path.relative_to(METADATA_DIR.resolve())
+    except ValueError as error:
+        raise HTTPException(400, "Metadata id is outside the metadata cache") from error
+    if not path.is_file():
+        raise HTTPException(404, "Song metadata has expired; search again")
+    return path
+
+
+def _metadata_manifest(metadata_id: str) -> dict[str, Any]:
+    path = _metadata_manifest_path(metadata_id)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(500, "Cached song metadata is unreadable") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(500, "Cached song metadata is invalid")
+    return payload
+
+
+def _metadata_cover_path(metadata_id: str | None) -> Path | None:
+    if not metadata_id:
+        return None
+    payload = _metadata_manifest(str(metadata_id))
+    raw_path = str(payload.get("_cachePath") or "")
+    if not raw_path:
+        return None
+    path = Path(raw_path).resolve()
+    try:
+        path.relative_to(METADATA_DIR.resolve())
+    except ValueError as error:
+        raise HTTPException(400, "Cached artwork is outside the metadata cache") from error
+    return path if path.is_file() else None
+
+
 @app.on_event("startup")
 def _on_startup() -> None:
     _cleanup_old_jobs()
@@ -300,6 +341,7 @@ def _run_job(job_id: str) -> None:
         map_dir = job_dir / "map"
         anchors = job_dir / "anchors.json"
         palette = job_dir / "approved_palette.json"
+        metadata_cover = _metadata_cover_path(initial.get("metadataId"))
         result = run_premium_pipeline(
             audio=_audio_path(job_id),
             output=map_dir,
@@ -309,6 +351,7 @@ def _run_job(job_id: str) -> None:
             seed=int(initial.get("seed", 42)),
             anchors=anchors if anchors.is_file() else None,
             palette=palette if palette.is_file() else None,
+            cover=metadata_cover,
             progress=progress,
             allow_unconfirmed=True,
             difficulties=list(initial.get("difficulties") or STUDIO_DIFFICULTIES),
@@ -501,6 +544,51 @@ def health() -> dict[str, str]:
     return {"status": "ok", "pipeline": "official-premium"}
 
 
+@app.get("/api/song-metadata")
+def song_metadata(
+    title: str = Query(..., min_length=1, max_length=200),
+    artist: str = Query("", max_length=200),
+) -> dict[str, Any]:
+    """Find track metadata and cache provider artwork for the next local run."""
+
+    try:
+        payload = search_song_metadata(title, artist, cache_dir=METADATA_DIR)
+    except SongMetadataNotFound as error:
+        raise HTTPException(404, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(502, str(error)) from error
+    metadata_id = str(payload.get("metadataId") or "")
+    if len(metadata_id) != 20:
+        raise HTTPException(502, "Metadata provider returned an invalid track id")
+    cache_path = payload.pop("_cachePath", None)
+    artwork = payload.get("artwork")
+    if isinstance(artwork, dict) and artwork.get("cached"):
+        payload["artwork"] = {
+            **artwork,
+            "previewUrl": f"/api/song-metadata/{metadata_id}/artwork",
+        }
+    manifest = {**payload, "_cachePath": cache_path}
+    METADATA_DIR.mkdir(parents=True, exist_ok=True)
+    (METADATA_DIR / f"{metadata_id}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return payload
+
+
+@app.get("/api/song-metadata/{metadata_id}/artwork")
+def song_metadata_artwork(metadata_id: str) -> FileResponse:
+    payload = _metadata_manifest(metadata_id)
+    raw_path = str(payload.get("_cachePath") or "")
+    if not raw_path:
+        raise HTTPException(404, "This track has no cached album artwork")
+    path = Path(raw_path).resolve()
+    try:
+        path.relative_to(METADATA_DIR.resolve())
+    except ValueError as error:
+        raise HTTPException(400, "Cached artwork is outside the metadata cache") from error
+    if not path.is_file():
+        raise HTTPException(404, "Cached album artwork is missing")
+    return FileResponse(path)
+
+
 @app.post("/api/generate")
 async def generate(
     background_tasks: BackgroundTasks,
@@ -510,11 +598,14 @@ async def generate(
     mapper: str = Form("BeatForge"),
     seed: int = Form(42),
     difficulties: str | None = Form(None),
+    metadata_id: str | None = Form(None),
 ) -> JSONResponse:
     suffix = Path(audio.filename or "song.mp3").suffix.casefold() or ".mp3"
     if suffix not in {".mp3", ".wav", ".ogg", ".egg", ".flac", ".m4a", ".mp4"}:
         raise HTTPException(400, "Upload MP3, WAV, OGG, FLAC, M4A, or MP4 audio")
     chosen = parse_studio_difficulties(difficulties)
+    if metadata_id:
+        _metadata_manifest(metadata_id)
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
@@ -530,6 +621,7 @@ async def generate(
         "seed": seed,
         "profile": "official-premium",
         "difficulties": chosen,
+        "metadataId": metadata_id,
         "stages": [],
         "startedAt": time.time(),
         "elapsed": 0,

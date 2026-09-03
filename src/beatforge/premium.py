@@ -54,6 +54,7 @@ def run_premium_pipeline(
     anchors: Path | None,
     palette: Path | None,
     progress: Callable[..., None],
+    cover: Path | None = None,
     allow_unconfirmed: bool = False,
     difficulties: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -81,6 +82,8 @@ def run_premium_pipeline(
         command += ["--anchors", str(anchors)]
     if palette:
         command += ["--palette", str(palette)]
+    if cover:
+        command += ["--cover", str(cover)]
     if allow_unconfirmed:
         command += ["--continue-unconfirmed"]
     for name in difficulties or []:

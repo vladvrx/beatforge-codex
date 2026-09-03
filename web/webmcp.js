@@ -22,7 +22,7 @@
   const getStudioContext = {
     name: "get_studio_context",
     title: "Read BeatForge studio context",
-    description: "Read the current track, creative brief, mapping settings, safety-gated run state, and the next useful human or agent action.",
+    description: "Read the current track, resolved song metadata and artwork, cover-derived palette, creative brief, mapping settings, safety-gated run state, and the next useful human or agent action.",
     inputSchema: {
       type: "object",
       properties: { includeActivity: { type: "boolean", description: "Include the latest agent activity entries." } },
@@ -30,6 +30,32 @@
     },
     annotations: { readOnlyHint: true, destructiveHint: false },
     execute: withActivity("get_studio_context", (input, app) => app.getStudioState(input)),
+  };
+
+  const findSongMetadata = {
+    name: "find_song_metadata",
+    title: "Find song metadata and cover",
+    description: "Search public catalog metadata using a song title and optional artist, populate the visible BeatForge fields, show the album cover, and prepare cover-derived saber colors. This returns metadata and a permitted short preview when the provider offers one; it never infers a full-recording download.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 200, description: "Song title to search for." },
+        artist: { type: "string", maxLength: 200, description: "Artist or band name to disambiguate the song." },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, untrustedContentHint: true, destructiveHint: false },
+    execute: withActivity("find_song_metadata", (input, app) => app.findSongMetadata(input)),
+  };
+
+  const importSongPreview = {
+    name: "import_song_preview",
+    title: "Import permitted song preview",
+    description: "Import the short preview URL returned by find_song_metadata into the visible local-audio slot. The preview is not the full recording and is not a substitute for user-provided mastered audio.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true, destructiveHint: false },
+    execute: withActivity("import_song_preview", (_input, app) => app.importSongPreview()),
   };
 
   const setMappingPlan = {
@@ -108,7 +134,7 @@
     execute: withActivity("record_human_playtest", (input, app) => app.recordPlaytest(input)),
   };
 
-  const tools = [getStudioContext, setMappingPlan, loadDemoSession, generateBeatmap, reviewCurrentBeatmap, recordHumanPlaytest];
+  const tools = [getStudioContext, findSongMetadata, importSongPreview, setMappingPlan, loadDemoSession, generateBeatmap, reviewCurrentBeatmap, recordHumanPlaytest];
 
   function setStatus(status, detail) {
     window.__beatforgeWebMcp = { ...(window.__beatforgeWebMcp || {}), status, detail, tools };

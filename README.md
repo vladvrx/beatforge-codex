@@ -2,7 +2,7 @@
 
 BeatForge is a local Windows studio console for generating and reviewing five-difficulty Beat Saber Standard packs. The website and the default `beatforge` CLI invoke the bundled `beat-saber-mapping` premium pipeline (`generate_map.py --profile official-premium --full-spread`). They do not use the legacy `beatforge.place` chart generator unless you pass `--legacy`.
 
-The WebMCP Challenge edition was built with OpenAI Codex as the sole coding assistant. The app exposes a typed WebMCP collaboration surface while keeping final playability decisions with a human in a headset.
+The WebMCP Challenge edition was built as a solo project with OpenAI Codex as the only AI coding assistant. In my own testing, MCP access makes generation iteration nearly 10 times faster than my previous manual workflow. I estimate the combined analysis, constraints, and review process produces roughly 100 times better consistency and playable quality. These are project observations, not a controlled industry benchmark.
 
 Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. The full FastAPI studio can still be run locally or deployed with `render.yaml`.
 
@@ -112,11 +112,13 @@ Provider setup fetches the models available to the user’s account and pins the
 ## WebMCP Challenge edition
 
 BeatForge exposes a human-agent collaboration surface through the browser's
-WebMCP API. The human supplies audio and creative intent; an agent can read
-the studio context, apply a typed mapping plan, start a run, inspect the
-safety-gated result, and record only headset evidence explicitly supplied by
-the human. The agent cannot receive song audio through these tools and cannot
-claim that a map is playable without human evidence.
+WebMCP API. The human supplies audio and creative intent; an agent can find
+catalog metadata and album art from a title/artist query, read the studio
+context, apply a typed mapping plan, start a run, inspect the safety-gated
+result, and record only headset evidence explicitly supplied by the human.
+The finder may import a provider's short preview, but never infers or rips a
+full copyrighted recording from metadata. The agent cannot claim that a map is
+playable without human evidence.
 
 The implementation is in [`web/webmcp.js`](web/webmcp.js) and uses the
 standard `document.modelContext.registerTool()` API. The visible collaboration
@@ -128,7 +130,9 @@ For a rights-safe browser walkthrough, open the studio and click **Load
 collaboration demo**. This loads a synthetic 30-second groove and exercises
 the same plan, preview, review, and human-evidence boundary without requiring
 a local audio file or Beat Saber installation. The full local pipeline remains
-available after uploading a mastered track.
+available after uploading a mastered track. The public catalog path only supplies
+metadata, artwork, and a permitted short preview. Full generation requires the
+user's complete rights-cleared MP3 or another supported local audio file.
 
 The challenge pitch, workflow, testing instructions, and submission checklist
 are in [`docs/webmcp-challenge.md`](docs/webmcp-challenge.md). A minimal Render
@@ -138,6 +142,10 @@ To test WebMCP itself, use ChatGPT's in-app browser or Chrome 149+ with
 `chrome://flags/#enable-webmcp-testing` enabled. Ask the visiting agent to
 call `get_studio_context`, `set_mapping_plan`, and `generate_beatmap` while the
 activity panel is visible.
+
+The local metadata endpoint caches the matched cover and the generator uses
+that exact image to derive and validate the Beat Saber saber/environment color
+scheme. A full mastered track is still required for a complete map run.
 
 `release_candidate` is off unless `BEATFORGE_AI_RELEASE_ROUTE=1`. When the Codex review route is on, it still requires verified timing, an approved palette, zero unresolved local and Codex findings, recorded full-speed clears, slow Expert/Expert+ when those maps exist, and a separate tester’s fresh sight-read.
 

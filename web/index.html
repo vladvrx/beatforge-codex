@@ -99,6 +99,19 @@
     .primary:hover:not(:disabled) { filter: brightness(1.07); }
     button:disabled { opacity: .42; cursor: not-allowed; }
     .microcopy { margin: 9px 0 0; color: var(--dim); font-size: 11px; }
+    .metadata-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .metadata-card { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 13px; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(11,13,17,.72); }
+    .metadata-cover { width: 92px; height: 92px; border-radius: 9px; object-fit: cover; background: #0b0d11; }
+    .metadata-copy { min-width: 0; }
+    .metadata-copy strong, .metadata-copy span { display: block; overflow-wrap: anywhere; }
+    .metadata-copy strong { font-size: 13px; }
+    .metadata-copy span { color: var(--muted); font-size: 11px; }
+    .metadata-copy .metadata-source { margin-top: 5px; color: var(--dim); font: 10px ui-monospace, Consolas, monospace; }
+    .metadata-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .metadata-actions a { color: var(--muted); font-size: 11px; }
+    .metadata-preview { width: 100%; max-width: 300px; height: 30px; margin-top: 8px; }
+    .metadata-palette { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 9px; color: var(--dim); font-size: 10px; }
+    .metadata-swatch { width: 24px; height: 18px; border: 1px solid rgba(255,255,255,.3); border-radius: 5px; }
     .connectors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .connector { min-height: 160px; border: 1px solid var(--line); border-radius: 14px; background: #0d0f13; padding: 15px; display: flex; flex-direction: column; text-align: left; color: var(--text); }
     .connector-top { display: flex; align-items: center; gap: 9px; }
@@ -218,8 +231,9 @@
           </label>
         </div>
         <label class="dropzone" id="drop" for="audioFile">
-          <strong>Drop the mastered track here</strong>
+          <strong>Drop the complete mastered track here</strong>
           <span class="dropzone-hint">MP3, WAV, OGG, FLAC, M4A, or MP4</span>
+          <small class="dropzone-note">Catalog previews are only for discovery. Full generation uses your local, rights-cleared audio file.</small>
           <span class="sr-only">Choose a mastered audio file</span>
           <input class="dropzone-input" id="audioFile" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.mp4" aria-label="Mastered audio file">
         </label>
@@ -228,6 +242,25 @@
           <label class="field">Song title<input id="title" autocomplete="off" placeholder="Read from metadata"></label>
           <label class="field">Artist<input id="artist" autocomplete="off" placeholder="Read from metadata"></label>
         </div>
+        <div class="metadata-tools">
+          <button class="secondary" id="findMetadata" type="button">Find song details + cover</button>
+          <span class="agent-helper">Uses public catalog metadata; full recordings are never inferred from a lookup.</span>
+        </div>
+        <section class="metadata-card" id="metadataCard" hidden aria-live="polite" aria-label="Song metadata result">
+          <img class="metadata-cover" id="metadataCover" alt="Album cover" hidden>
+          <div class="metadata-copy">
+            <strong id="metadataTrack"></strong>
+            <span id="metadataAlbum"></span>
+            <span id="metadataFacts"></span>
+            <span class="metadata-source" id="metadataSourceLabel"></span>
+            <audio class="metadata-preview" id="metadataPreview" controls hidden aria-label="Song preview"></audio>
+            <div class="metadata-actions">
+              <button class="secondary" id="useMetadataPreview" type="button" hidden>Import permitted preview</button>
+              <a id="metadataSource" href="#" target="_blank" rel="noreferrer" hidden>Open catalog source</a>
+            </div>
+            <div class="metadata-palette" id="metadataPalette"></div>
+          </div>
+        </section>
         <div class="field-grid" id="advancedFields" hidden>
           <label class="field">Mapper credit<input id="mapper" value="BeatForge" autocomplete="off"></label>
           <label class="field">Deterministic seed<input id="seed" type="number" value="42"></label>
@@ -360,6 +393,8 @@
     let demoEvidence = [];
     let agentActivity = [];
     let webmcpStatus = 'checking';
+    let songMetadata = null;
+    let metadataId = null;
 
     function formatElapsed(seconds) {
       const value = Math.max(0, Number(seconds) || 0);
@@ -391,6 +426,165 @@
       try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = { detail: raw }; }
       if (!response.ok) throw new Error(payload.detail || `Request failed with ${response.status}`);
       return payload;
+    }
+
+    function metadataText(value) {
+      return String(value || '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    }
+    function metadataScore(title, artist, candidateTitle, candidateArtist) {
+      const titleScore = similarity(metadataText(title), metadataText(candidateTitle));
+      const artistValue = metadataText(artist);
+      if (!artistValue) return titleScore;
+      return 0.68 * titleScore + 0.32 * similarity(artistValue, metadataText(candidateArtist));
+    }
+    function similarity(left, right) {
+      if (!left || !right) return 0;
+      if (left === right) return 1;
+      const leftTokens = new Set(left.split(' '));
+      const rightTokens = new Set(right.split(' '));
+      const overlap = [...leftTokens].filter(token => rightTokens.has(token)).length;
+      const tokenScore = (2 * overlap) / (leftTokens.size + rightTokens.size);
+      let prefix = 0;
+      while (prefix < Math.min(left.length, right.length) && left[prefix] === right[prefix]) prefix += 1;
+      return Math.max(tokenScore, prefix / Math.max(left.length, right.length));
+    }
+    function rgbHex(rgb) {
+      return `#${rgb.map(value => Math.max(0, Math.min(255, Math.round(Number(value) * 255))).toString(16).padStart(2, '0')).join('')}`;
+    }
+    function browserCoverPalette(imageUrl) {
+      if (!imageUrl) return Promise.resolve(null);
+      return new Promise(resolve => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(image, 0, 0, 64, 64);
+            const pixels = context.getImageData(0, 0, 64, 64).data;
+            const buckets = new Map();
+            for (let index = 0; index < pixels.length; index += 12) {
+              const rgb = [pixels[index] >> 4, pixels[index + 1] >> 4, pixels[index + 2] >> 4];
+              const key = rgb.join(',');
+              buckets.set(key, (buckets.get(key) || 0) + 1);
+            }
+            const colors = [...buckets.entries()].map(([key, count]) => ({ count, rgb: key.split(',').map(value => (Number(value) * 16 + 8) / 255) }))
+              .filter(item => Math.max(...item.rgb) - Math.min(...item.rgb) >= 0.12 && item.rgb.reduce((sum, value) => sum + value, 0) >= 0.16)
+              .sort((left, right) => right.count - left.count);
+            if (colors.length < 2) return resolve(null);
+            const first = colors[0].rgb;
+            const second = colors.slice(1).sort((left, right) => colorDistance(right.rgb, first) - colorDistance(left.rgb, first))[0].rgb;
+            resolve({ status: 'preview', source: 'browser-cover-sample', left: first, right: second, leftHex: rgbHex(first), rightHex: rgbHex(second), mapColors: 'The local generator rechecks cover readability before writing Info.dat.' });
+          } catch (_) {
+            resolve(null);
+          }
+        };
+        image.onerror = () => resolve(null);
+        image.src = imageUrl;
+      });
+    }
+    function colorDistance(left, right) {
+      return Math.sqrt(left.reduce((sum, value, index) => sum + (value - right[index]) ** 2, 0));
+    }
+    async function fetchItunesMetadata(title, artist) {
+      const response = await fetch(`https://itunes.apple.com/search?${new URLSearchParams({ term: `${title} ${artist}`.trim(), media: 'music', entity: 'song', limit: '25' })}`);
+      if (!response.ok) throw new Error(`Song catalog request failed (${response.status})`);
+      const data = await response.json();
+      const candidates = (data.results || []).filter(item => item && (!item.kind || item.kind === 'song')).map(item => ({ item, score: metadataScore(title, artist, item.trackName, item.artistName) })).sort((left, right) => right.score - left.score);
+      if (!candidates[0] || candidates[0].score < 0.62) throw new Error(`No close song match found for ${title} · ${artist || 'unknown artist'}`);
+      const item = candidates[0].item;
+      const previewUrl = item.previewUrl ? String(item.previewUrl).replace(/^http:/, 'https:') : null;
+      const artworkUrl = item.artworkUrl100 ? String(item.artworkUrl100).replace(/\d+x\d+(?:bb)?/, '600x600bb') : null;
+      const track = { trackId: item.trackId, title: item.trackName, artist: item.artistName, album: item.collectionName || null, albumArtist: item.collectionArtistName || null, releaseDate: item.releaseDate || null, genre: item.primaryGenreName || null, country: item.country || null, trackNumber: item.trackNumber ?? null, discNumber: item.discNumber ?? null, durationSeconds: Number.isFinite(Number(item.trackTimeMillis)) ? Number(item.trackTimeMillis) / 1000 : null, explicit: item.trackExplicitness === 'explicit', matchConfidence: candidates[0].score, trackUrl: item.trackViewUrl || null, albumUrl: item.collectionViewUrl || null, artworkUrl, previewUrl };
+      return { status: 'found', source: 'itunes-search-browser', query: { title, artist }, metadataId: null, track, alternatives: candidates.slice(1, 5).map(candidate => candidate.item), artwork: artworkUrl ? { url: artworkUrl, source: 'itunes-search', cached: false } : null, palette: null, audio: previewUrl ? { kind: 'provider-preview', url: previewUrl, durationSeconds: track.durationSeconds, downloadable: false, label: 'Short provider preview; not the full recording' } : null, fullRecordingDownload: null };
+    }
+    async function resolveSongMetadata(title, artist) {
+      try {
+        const params = new URLSearchParams({ title, artist });
+        const local = await api(`/api/song-metadata?${params.toString()}`);
+        if (local?.track) return local;
+      } catch (_) {
+        // GitHub Pages is a static demo; fall back to the public catalog API.
+      }
+      return fetchItunesMetadata(title, artist);
+    }
+    async function renderSongMetadata(result) {
+      const track = result.track || {};
+      const artwork = result.artwork || {};
+      const coverUrl = artwork.previewUrl || artwork.url || track.artworkUrl;
+      $('metadataCard').hidden = false;
+      $('metadataTrack').textContent = [track.title, track.artist].filter(Boolean).join(' · ');
+      $('metadataAlbum').textContent = [track.album, track.releaseDate ? String(track.releaseDate).slice(0, 10) : ''].filter(Boolean).join(' · ') || 'Album details unavailable';
+      $('metadataFacts').textContent = [track.genre, track.durationSeconds ? `${Math.round(track.durationSeconds)}s` : '', track.explicit ? 'Explicit' : ''].filter(Boolean).join(' · ') || 'Catalog metadata found';
+      $('metadataSourceLabel').textContent = `${result.source || 'public catalog'} · match ${(Number(track.matchConfidence || 0) * 100).toFixed(0)}%`;
+      const cover = $('metadataCover');
+      cover.hidden = !coverUrl;
+      if (coverUrl) { cover.src = coverUrl; cover.alt = `${track.album || track.title || 'Song'} album cover`; }
+      const preview = $('metadataPreview');
+      const usePreview = $('useMetadataPreview');
+      preview.hidden = !result.audio?.url;
+      preview.src = result.audio?.url || '';
+      usePreview.hidden = !result.audio?.url;
+      const source = $('metadataSource');
+      source.hidden = !track.trackUrl;
+      source.href = track.trackUrl || '#';
+      const palette = result.palette || await browserCoverPalette(coverUrl);
+      if (palette) result.palette = palette;
+      const paletteTarget = $('metadataPalette');
+      if (palette?.left && palette?.right) {
+        const leftHex = palette.leftHex || rgbHex(palette.left);
+        const rightHex = palette.rightHex || rgbHex(palette.right);
+        paletteTarget.innerHTML = `<span>Cover palette for map</span><i class="metadata-swatch" title="Left saber ${escapeHtml(leftHex)}" style="background:${escapeHtml(leftHex)}"></i><i class="metadata-swatch" title="Right saber ${escapeHtml(rightHex)}" style="background:${escapeHtml(rightHex)}"></i><span>${escapeHtml(palette.status === 'needs_approval' ? 'Local generation will apply and validate it.' : 'Preview sample; local generation rechecks it.')}</span>`;
+      } else {
+        paletteTarget.textContent = coverUrl ? 'Cover found; local generation will derive and validate the saber colors.' : 'No album artwork was returned.';
+      }
+      songMetadata = result;
+      return result;
+    }
+    async function findSongMetadata(input = {}) {
+      const title = String(input.title ?? $('title').value).trim();
+      const artist = String(input.artist ?? $('artist').value).trim();
+      if (!title) throw new Error('Enter a song title before searching');
+      $('findMetadata').disabled = true;
+      setState('Finding song metadata', 'Searching a public music catalog for the closest title and artist match.', 'live', { algorithm: 'webmcp · metadata' });
+      try {
+        const result = await renderSongMetadata(await resolveSongMetadata(title, artist));
+        metadataId = result.metadataId || null;
+        if (result.track?.title) $('title').value = String(result.track.title).slice(0, 200);
+        if (result.track?.artist) $('artist').value = String(result.track.artist).slice(0, 200);
+        setState('Song metadata found', 'Album art and readable cover colors are ready for the local generation run.', 'good', { algorithm: 'webmcp · metadata' });
+        recordAgentActivity({ kind: 'agent', label: 'Song metadata resolved', detail: `${result.track.title} · ${result.track.artist}` });
+        return { ...result, state: getStudioState({ includeActivity: true }) };
+      } catch (error) {
+        setState('Song metadata lookup failed', error.message, 'bad', { algorithm: 'webmcp · metadata' });
+        throw error;
+      } finally {
+        $('findMetadata').disabled = false;
+      }
+    }
+    async function importSongPreview() {
+      const audio = songMetadata?.audio;
+      if (!audio?.url) throw new Error('Find a song with a provider preview first');
+      setState('Importing permitted preview', 'Downloading only the provider preview; it is not the full recording.', 'live', { algorithm: 'webmcp · preview' });
+      try {
+        const response = await fetch(audio.url);
+        if (!response.ok) throw new Error(`Preview download failed (${response.status})`);
+        const blob = await response.blob();
+        const extension = /mp4|m4a|aac/i.test(blob.type) || /m4a|mp4/i.test(audio.url) ? '.m4a' : '.mp3';
+        const safeTitle = String(songMetadata.track?.title || 'song').replace(/[^\w -]+/g, '').trim() || 'song';
+        audioFile = new File([blob], `${safeTitle} preview${extension}`, { type: blob.type || 'audio/mp4' });
+        demoMode = false;
+        $('audioFile').value = '';
+        $('filename').textContent = `${audioFile.name} · provider preview`;
+        setState('Preview audio loaded', 'This short preview can exercise the local pipeline; upload the full mastered track for a complete map.', 'good', { algorithm: 'webmcp · preview' });
+        recordAgentActivity({ kind: 'agent', label: 'Imported provider preview', detail: audioFile.name });
+        return { ok: true, previewOnly: true, audioReady: true, state: getStudioState({ includeActivity: true }) };
+      } catch (error) {
+        setState('Preview import failed', error.message, 'bad', { algorithm: 'webmcp · preview' });
+        throw error;
+      }
     }
 
     function recordAgentActivity(entry) {
@@ -445,7 +639,7 @@
       return [...document.querySelectorAll('.diff-toggle[aria-pressed="true"]')].map(button => button.dataset.difficulty);
     }
     function currentMappingPlan() {
-      return { title: $('title').value.trim(), artist: $('artist').value.trim(), mapper: $('mapper').value.trim() || 'BeatForge', seed: Number($('seed').value || 42), difficulties: selectedDifficulties(), creativeBrief: $('creativeBrief').value.trim() };
+      return { title: $('title').value.trim(), artist: $('artist').value.trim(), mapper: $('mapper').value.trim() || 'BeatForge', seed: Number($('seed').value || 42), difficulties: selectedDifficulties(), creativeBrief: $('creativeBrief').value.trim(), metadataId };
     }
     function applyMappingPlan(plan = {}) {
       const allowed = new Set(['Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus']);
@@ -477,8 +671,9 @@
         qa: lastJob.qa || null,
         releaseGate: lastJob.releaseGate || null,
       } : null;
-      const nextActions = job ? (job.status === 'playtest_candidate' ? ['Play the generated chart in a headset', 'Record the human pass with record_human_playtest'] : ['Inspect the current run state']) : (audioFile ? ['Apply a mapping plan', 'Generate a BeatForge map'] : ['Upload mastered audio or load_collaboration_demo']);
-      const state = { app: 'BeatForge Studio', mode: demoMode ? 'rights-safe-demo' : 'local-audio', webmcp: webmcpStatus, audioReady: Boolean(audioFile), track: audioFile ? { name: audioFile.name, sizeBytes: audioFile.size || null, demo: Boolean(audioFile.demo) } : null, mappingPlan: currentMappingPlan(), job, nextActions };
+      const nextActions = job ? (job.status === 'playtest_candidate' ? ['Play the generated chart in a headset', 'Record the human pass with record_human_playtest'] : ['Inspect the current run state']) : (audioFile ? ['Apply a mapping plan', 'Generate a BeatForge map'] : (songMetadata?.audio ? ['Import the permitted preview or upload mastered audio', 'Generate a map only after local audio is ready'] : ['Find song metadata or upload mastered audio']));
+      const metadata = songMetadata ? { metadataId, source: songMetadata.source, track: songMetadata.track, artwork: songMetadata.artwork, palette: songMetadata.palette ? { source: songMetadata.palette.source, status: songMetadata.palette.status, left: songMetadata.palette.left, right: songMetadata.palette.right } : null, audio: songMetadata.audio } : null;
+      const state = { app: 'BeatForge Studio', mode: demoMode ? 'rights-safe-demo' : 'local-audio', webmcp: webmcpStatus, audioReady: Boolean(audioFile), track: audioFile ? { name: audioFile.name, sizeBytes: audioFile.size || null, demo: Boolean(audioFile.demo) } : null, metadata, mappingPlan: currentMappingPlan(), job, nextActions };
       if (options.includeActivity) state.activity = agentActivity.slice(-8);
       return state;
     }
@@ -494,6 +689,9 @@
       demoMode = true;
       demoEvidence = [];
       audioFile = { name: 'neon-rain-demo.wav', size: 3145728, type: 'audio/wav', demo: true };
+      songMetadata = null;
+      metadataId = null;
+      $('metadataCard').hidden = true;
       $('title').value = 'Neon Rain';
       $('artist').value = 'BeatForge Demo';
       $('mapper').value = 'BeatForge + human/agent session';
@@ -535,6 +733,7 @@
       form.append('mapper', $('mapper').value);
       form.append('seed', $('seed').value || '42');
       form.append('difficulties', chosen.join(','));
+      if (metadataId) form.append('metadataId', metadataId);
       $('generate').disabled = true;
       const trackName = [$('title').value, $('artist').value].filter(Boolean).join(' · ') || audioFile.name;
       $('statusTrack').textContent = trackName;
@@ -555,6 +754,8 @@
         return { ok: false, error: error.message };
       }
     }
+    $('findMetadata').addEventListener('click', () => findSongMetadata());
+    $('useMetadataPreview').addEventListener('click', () => importSongPreview().catch(() => {}));
     document.querySelectorAll('.diff-toggle').forEach(button => {
       button.addEventListener('click', () => {
         const on = button.getAttribute('aria-pressed') !== 'true';
@@ -808,7 +1009,7 @@
       } catch (error) { setState('Provider setup failed', error.message, 'bad'); }
     });
     function showReport(title, report) { $('reportTitle').textContent = title; $('reportBody').textContent = JSON.stringify(report, null, 2); $('reportDialog').showModal(); }
-    window.BeatForgeApp = { getStudioState, applyMappingPlan, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
+    window.BeatForgeApp = { getStudioState, applyMappingPlan, findSongMetadata, importSongPreview, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
   </script>
   <script src="/web/webmcp.js"></script>
 </body>

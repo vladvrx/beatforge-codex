@@ -12,6 +12,7 @@ venv/
 data/corpus/
 data/jobs/
 data/imports/
+data/metadata/
 data/backups/
 data/openai-brand/
 test-tmp-*/
