@@ -4,6 +4,8 @@ BeatForge is a local Windows studio console for generating and reviewing five-di
 
 The WebMCP Challenge edition was built with OpenAI Codex as the sole coding assistant. The app exposes a typed WebMCP collaboration surface while keeping final playability decisions with a human in a headset.
 
+Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. The full FastAPI studio can still be run locally or deployed with `render.yaml`.
+
 Every run is sample-based, deterministic, and refusal-gated. Uncertain timing returns `needs_anchors`. Missing or unreadable artwork returns `needs_palette`. Same-hand flow conflicts, inward-facing handclaps, saber collisions, arc or chain ownership errors, bomb paths, walls, vision blocks, schema errors, and timing failures block the output.
 
 ## Local setup

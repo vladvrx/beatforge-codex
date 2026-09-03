@@ -792,7 +792,7 @@
       }
     });
     $('launchGame').addEventListener('click', async () => { try { const result = await api(`/api/jobs/${jobId}/launch`, {method:'POST'}); setState('Beat Saber started', result.message, 'good'); } catch (error) { setState('Launch failed', error.message, 'bad'); } });
-    $('showQa').addEventListener('click', async () => { try { const report = await api(`/api/jobs/${jobId}/critic`); showReport('Local QA report', report); } catch (error) { setState('QA report unavailable', error.message, 'bad'); } });
+    $('showQa').addEventListener('click', async () => { try { if (demoMode && lastJob) return showReport('Preview QA', lastJob.qa || { status: 'pass', errors: 0, warnings: 0 }); const report = await api(`/api/jobs/${jobId}/critic`); showReport('Local QA report', report); } catch (error) { setState('QA report unavailable', error.message, 'bad'); } });
 
     function openProviderSetup(provider, settings) { $('providerName').textContent = `${settings.label || 'OpenAI Codex'} setup`; $('providerModel').value = settings.model || 'gpt-5.6-codex'; $('providerBudget').value = settings.maximumCostUsd || 5; $('providerKey').value = ''; $('providerDialog').showModal(); }
     $('providerForm').addEventListener('submit', async event => {

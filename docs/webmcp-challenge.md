@@ -27,6 +27,10 @@ The page registers these tools when the browser exposes WebMCP:
 - `review_current_beatmap` — return safety-gated status and QA information.
 - `record_human_playtest` — record evidence supplied by a human after they actually play.
 
+The GitHub Pages demo is <https://vladvrx.github.io/beatforge-codex/>. It builds
+the same `web/index.html` and `web/webmcp.js` into a rights-safe static preview;
+the full FastAPI app remains available through the included Render definition.
+
 ## Test locally
 
 ```powershell
