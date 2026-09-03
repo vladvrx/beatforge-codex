@@ -8,7 +8,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
+
+torch = pytest.importorskip(
+    "torch",
+    reason="RL tests require the optional model dependencies",
+)
 
 from rl.dataset import BeatSaberTrajectoryDataset
 from rl.environment import (
