@@ -32,6 +32,8 @@ FastAPI owns real audio uploads, background jobs, progress events, validation, p
 
 Demucs is the source-separation step. BeatForge uses the `htdemucs_6s` model when the optional model dependencies are installed, producing drums, bass, guitar, piano, vocals, and other stems. Stem analysis helps expose percussion, vocal, and harmonic disagreement in difficult passages. The full-mix tracker ensemble still has to meet the timing gate, so stems never hide uncertain timing.
 
+I also ran local reinforcement-learning environments for a full week to improve the mapping search. The PPO policy saw beat-grid features, Demucs stem energy, the current hand kinematics, target difficulty, and a short lookahead window. Its reward favored onset alignment, musical density, readable flow, and safe two-hand coordination. It penalized repeated cuts, insufficient recovery, handclaps, saber-path collisions, vision blocks, and other unsafe transitions. I used the learned behavior to improve candidate generation and iteration. Deterministic validators and human VR testing remained the release gates.
+
 The premium generator builds Easy, Normal, Hard, Expert, and Expert+ independently. It plans notes, arcs, chains, bombs, walls, and lighting around hand reach, saber paths, recovery, vision, and body movement. Validation blocks unsafe or structurally invalid output. A generated chart remains a `playtest_candidate` until a human completes VR and fresh sight-read checks.
 
 The browser layer lives in `web/webmcp.js`. It feature-detects `document.modelContext`, registers eight JSON-Schema tools, returns compact JSON results, and records calls in the page activity log. The main page shows the plan, WebMCP status, exposed tools, album artwork, and review results. The public GitHub Pages build uses a synthetic groove so judges can test the collaboration loop without copyrighted audio, credentials, a local model cache, or a Beat Saber installation.
@@ -49,6 +51,8 @@ The hardest safety decision was what an agent must never be allowed to say. A ch
 ## Accomplishments that we're proud of
 
 I built the complete mapping pipeline and the WebMCP challenge layer as a solo project. The agent can now change a real mapping plan through typed operations instead of fragile UI guesses. The person sees those changes immediately, can keep or reject the direction, and can ask for another run without losing the conversation context.
+
+The week-long local RL runs gave the generator a stronger starting point for musical and physical decisions, while the hard safety contract prevented a learned policy from bypassing constraints.
 
 The activity panel makes the collaboration inspectable. The full-song path preserves local audio control, while the short-preview path gives judges a safe browser demo. The repository includes the source implementation, browser tests, setup instructions, an MIT license, and deployment definitions.
 

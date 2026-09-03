@@ -38,6 +38,15 @@ vocals, other) through `scripts/demucs_stems.py`. Do not use the Demucs CLI
 `--two-stems` karaoke mode. If 6-stem weights fail, four-stem `htdemucs` is
 recorded as a fallback in `analysis.json` / provenance. PCM16 stems are written
 with the stdlib `wave` module so Windows studios do not need TorchCodec.
+
+The portable mapping skill also includes a local PPO reinforcement-learning
+environment. I ran it for a week while improving candidate search. The policy
+observes beat-grid features, Demucs stem energy, hand kinematics, difficulty
+targets, and lookahead context. Rewards favor onset alignment, musical density,
+readable flow, and safe two-hand coordination; penalties cover repeated cuts,
+recovery violations, handclaps, saber-path collisions, and vision blocks. RL
+improves search and iteration, but deterministic validation and human VR tests
+remain mandatory release gates.
 Full-mix consensus still requires median ≤ 10 ms, p95 ≤ 20 ms, and drift ≤
 20 ms; stem trackers cannot pass that gate by themselves.
 

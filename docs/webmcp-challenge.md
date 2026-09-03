@@ -8,17 +8,17 @@ The longer Devpost project story is in [`docs/devpost-project-story.md`](devpost
 
 ## 300-word elevator pitch
 
-BeatForge is a solo-built studio that turns any rights-cleared full song into a Beat Saber map. I built the pipeline myself, with OpenAI Codex as the only AI coding assistant. The hard part is translating musical energy into readable movement while checking timing, reach, collision, and flow rules across five difficulties.
+BeatForge is a solo-built studio that turns any rights-cleared song into a Beat Saber map. I built the pipeline myself, with OpenAI Codex as the only AI coding assistant. The hard part is translating musical energy into readable movement while checking timing, reach, collision, and flow across five difficulties.
 
-WebMCP makes this a collaboration instead of a button-click macro. A person supplies the song, taste, and headset judgment. An agent reads structured studio state, helps refine the mapping brief, starts a run, interprets safety results, and records only evidence the person explicitly provides.
+WebMCP turns this into a collaboration. A person supplies the song, taste, and headset judgment. An agent reads studio state, refines the mapping brief, starts a run, interprets safety results, and records only evidence the person provides.
 
-The input path is clear. A user uploads a mastered track as an MP3, WAV, OGG, FLAC, M4A, or MP4. The WebMCP browser connection can look up metadata, artwork, and a short preview, but it never downloads a full copyrighted recording. The 30-second preview is for discovery and the public demo. Full generation uses the user's local audio file.
+Users upload a mastered track locally as MP3, WAV, OGG, FLAC, M4A, or MP4. The browser connection can find metadata, artwork, and a permitted 30-second preview, but never downloads a full copyrighted recording. The preview is for discovery and the public demo. Full generation uses the user's file.
 
-BeatForge analyzes the track with sample-level timing. Demucs separates it into drums, bass, guitar, piano, vocals, and other stems. Stem analysis reveals which musical layers drive each section. A full-mix tracker consensus has to pass strict timing gates. The generator then creates Easy through Expert+ charts, checks hand motion and safety constraints, validates the output, and waits for human playtesting before release.
+BeatForge analyzes the full track with sample-level timing. Demucs separates drums, bass, guitar, piano, vocals, and other stems. I ran local reinforcement-learning environments for a week. A PPO policy saw beat-grid features, stem energy, hand kinematics, difficulty targets, and lookahead context. Rewards favored onset alignment, readable density, musical flow, and safe two-hand coordination. Penalties covered repeated cuts, recovery violations, handclaps, collisions, and vision blocks. This improved candidate search, but deterministic validation and human VR testing remained mandatory.
 
-The WebMCP implementation registers eight typed JSON-Schema tools through `document.modelContext.registerTool` and logs every call in the interface. In my testing, MCP access makes generation iteration nearly 10 times faster than my previous manual workflow. I estimate the combined analysis, constraints, and review process produces roughly 100 times better consistency and playable quality. Those are my observed project results, not a controlled industry benchmark.
+The generator creates Easy through Expert+ charts, checks safety constraints, and waits for human playtesting. WebMCP registers eight typed JSON-Schema tools through `document.modelContext.registerTool` and logs every call. In my testing, MCP access made iteration nearly 10 times faster than my previous workflow. I estimate the combined analysis, RL, constraints, and review process produces roughly 100 times better consistency and playable quality. These are observed project results, not a controlled benchmark.
 
-BeatForge gives agents useful actions while keeping musical authorship and physical safety with the person who will actually play.
+BeatForge gives agents useful actions while keeping musical authorship and physical safety with the person who plays.
 
 ## WebMCP workflow
 
