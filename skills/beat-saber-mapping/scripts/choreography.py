@@ -181,6 +181,10 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             token in str(section.get("label", "")).lower() for token in ("peak", "chorus", "drop")
         )
         gap = config.peak_min_gap if is_peak else config.min_gap
+        if difficulty == "Hard" and is_peak and intensity >= 0.8:
+            # Reserve the denser quarter-grid for a genuinely high-intensity peak;
+            # ordinary Hard sections retain the one-beat readability floor.
+            gap *= 0.75
         adaptive_gap = max(gap, gap * (1.15 - 0.35 * intensity))
         if beat - last_beat + 1e-9 < adaptive_gap:
             continue
@@ -230,6 +234,9 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             if not recent_arc and available >= 0.25:
                 kind = "arc"
                 hold = min(3.0, max(0.5, round(max(sustain, min(available, 1.5)) * 4.0) / 4.0))
+                if difficulty == "ExpertPlus" and is_peak and available <= 1.0 + 1e-9:
+                    # Leave a readable pickup slot before the next peak accent.
+                    hold = 0.5
             
         if config.chains and kind == "note" and index + 1 < len(events):
             next_gap = float(events[index + 1]["beat"]) - beat
@@ -237,6 +244,10 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             if is_drum_roll and 0.0625 <= next_gap <= 0.375:
                 kind = "chain"
                 hold = min(0.25, max(0.0625, next_gap * 0.5))
+        if difficulty == "Expert" and abs(beat % 4.0) < 1e-9:
+            layer = "combo-stack"
+        elif difficulty == "ExpertPlus" and is_peak and abs(beat % 2.0) > 1e-9:
+            layer = "combo-stack"
         payload = {
             "beat": beat,
             "strength": strength,

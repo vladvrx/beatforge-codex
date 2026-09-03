@@ -25,7 +25,7 @@
     "scripts/artwork.py": "14125e7137951a3e43303e39c70e802d630bc34b14f8134222075dfdb6a5e941",
     "scripts/beatforge_core.py": "d42516074d1742af6af78fa13e45ef4b322a483a93b13b5ee3eb60402979acfd",
     "scripts/bootstrap.py": "8ba79ea3b0ad0ab96a8f6fa562634d6ac6eabd7b43983d19d74cae7ab8ba9dd8",
-    "scripts/choreography.py": "2294db36a5af205dad111d7988b3e9c32a3bfd6b7a8f27188aa2da840351b476",
+    "scripts/choreography.py": "0f7b8d2a00285039cfc75b825076dde8a2d13f043ebe3d0fb79a3d77a19a5c8d",
     "scripts/demucs_stems.py": "3e08440751ae131ad4b9c9f41639b29e98e9e7cc750b54a6c814650e3bff0749",
     "scripts/generate_map.py": "bf99db96ea6e0a92c18c745cb426667fb06e39e9bb6cc6a00d738c39518145b8",
     "scripts/inspect_map.py": "72675ed6d1a1eda3dc8459c9a86014f6cac1d44fed006385237835c846d88567",
