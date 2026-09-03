@@ -31,6 +31,8 @@ The GitHub Pages demo is <https://vladvrx.github.io/beatforge-codex/>. It builds
 the same `web/index.html` and `web/webmcp.js` into a rights-safe static preview;
 the full FastAPI app remains available through the included Render definition.
 
+The public demo video is <https://www.youtube.com/watch?v=ZVOPshpw5hY>.
+
 ## Test locally
 
 ```powershell
@@ -42,7 +44,7 @@ Open `http://127.0.0.1:8001/?demo=1` and click **Load collaboration demo**. In C
 
 ## Submission checklist
 
-- Live URL: deploy the included `render.yaml` or use another provider that runs the FastAPI app.
+- Live URL: use the deployed GitHub Pages demo at <https://vladvrx.github.io/beatforge-codex/>. The included `render.yaml` remains available for the full FastAPI app.
 - Repository: keep `LICENSE` at the repository root and publish the source publicly.
-- Demo: record a sub-three-minute video showing the demo session, tool discovery, a plan change, generation, review, and human-evidence boundary.
+- Demo: submit the public sub-three-minute video at <https://www.youtube.com/watch?v=ZVOPshpw5hY>, which shows the demo session, tool discovery, a plan change, generation, review, and human-evidence boundary.
 - Verification: use ChatGPT’s in-app browser or Chrome WebMCP testing and confirm the six tools are discoverable and callable.
