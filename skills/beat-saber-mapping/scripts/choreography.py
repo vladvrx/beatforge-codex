@@ -64,7 +64,9 @@ class DifficultyConfig:
 
 CONFIGS = {
     "Easy": DifficultyConfig(2.0, 0.78, 10.0, 0.5, RECOVERY_BEATS["Easy"], False, False, False, True, 2.0),
-    "Normal": DifficultyConfig(1.0, 0.68, 11.0, 0.5, RECOVERY_BEATS["Normal"], False, False, True, True, 1.0),
+    # Keep Normal below Hard in note density while preserving a full-beat
+    # readability floor for non-peak passages.
+    "Normal": DifficultyConfig(1.25, 0.68, 11.0, 0.5, RECOVERY_BEATS["Normal"], False, False, True, True, 1.25),
     "Hard": DifficultyConfig(1.0, 0.62, 13.0, 0.5, RECOVERY_BEATS["Hard"], True, True, True, True, 1.0),
     "Expert": DifficultyConfig(0.5, 0.48, 15.0, 0.5, RECOVERY_BEATS["Expert"], True, True, True, True, 0.5),
     "ExpertPlus": DifficultyConfig(0.5, 0.28, 16.0, 0.5, RECOVERY_BEATS["ExpertPlus"], True, True, True, True, 0.25),
@@ -181,10 +183,6 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             token in str(section.get("label", "")).lower() for token in ("peak", "chorus", "drop")
         )
         gap = config.peak_min_gap if is_peak else config.min_gap
-        if difficulty == "Hard" and is_peak and intensity >= 0.8:
-            # Reserve the denser quarter-grid for a genuinely high-intensity peak;
-            # ordinary Hard sections retain the one-beat readability floor.
-            gap *= 0.75
         adaptive_gap = max(gap, gap * (1.15 - 0.35 * intensity))
         if beat - last_beat + 1e-9 < adaptive_gap:
             continue
