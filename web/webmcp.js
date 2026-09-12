@@ -71,6 +71,7 @@
         seed: { type: "integer", minimum: -2147483648, maximum: 2147483647 },
         difficulties: { type: "array", items: { type: "string", enum: difficulties }, minItems: 1, maxItems: 5 },
         creativeBrief: { type: "string", maxLength: 1000, description: "The musical movement, mood, accessibility, or intensity brief." },
+        mappingPlan: {type:"object",additionalProperties:false,properties:{schemaVersion:{type:"integer",const:1},brief:{type:"string",maxLength:1000},style:{type:"string",enum:["balanced","flow","tech","chill"]},dominantInstrument:{type:"string",enum:["auto","drums","bass","vocals","guitar","piano","other"]},density:{type:"number",minimum:0.5,maximum:1.5},intensity:{type:"number",minimum:0.5,maximum:1.5},verseDensity:{type:"number",minimum:0.5,maximum:1.5},chorusDensity:{type:"number",minimum:0.5,maximum:1.5},noBombs:{type:"boolean"},noWalls:{type:"boolean"}}},
       },
       additionalProperties: false,
     },
@@ -134,7 +135,10 @@
     execute: withActivity("record_human_playtest", (input, app) => app.recordPlaytest(input)),
   };
 
-  const tools = [getStudioContext, findSongMetadata, importSongPreview, setMappingPlan, loadDemoSession, generateBeatmap, reviewCurrentBeatmap, recordHumanPlaytest];
+  const previewTool = {name:"get_chart_preview",title:"Read the current chart preview",description:"Read the previewed job, difficulty, exact chart hash, playback time and real note count. This is a visual inspection, not a headset test.",inputSchema:{type:"object",properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:withActivity("get_chart_preview",()=>window.BeatForgePreview.getState())};
+  const learningTool = {name:"get_learning_summary",title:"Read local improvement evidence",description:"Read the local feedback counts, saved presets and model registry status. Does not train or promote a model.",inputSchema:{type:"object",properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:withActivity("get_learning_summary",()=>window.BeatForgeLearning.getSummary())};
+  const feedbackTool = {name:"record_mapping_feedback",title:"Record feedback supplied by a person",description:"Save a person's explicitly supplied mapping preference for an existing local chart. Never infer or invent a rating. This does not record a headset clear.",inputSchema:{type:"object",properties:{jobId:{type:"string",pattern:"^[a-f0-9]{12}$"},difficulty:{type:"string",enum:difficulties},tester:{type:"string",minLength:1,maxLength:120},notes:{type:"string",maxLength:2000},tags:{type:"array",items:{type:"string",enum:["too_dense","too_sparse","awkward","tiring","repetitive","off_beat","good_flow"]}},ratings:{type:"object",additionalProperties:false,properties:Object.fromEntries(["overall","flow","readability","musicality","variety"].map(name=>[name,{type:"integer",minimum:1,maximum:5}]))}},required:["jobId","difficulty","tester"],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false},execute:withActivity("record_mapping_feedback",input=>window.BeatForgeLearning.recordFeedback(input))};
+  const tools = [getStudioContext, findSongMetadata, importSongPreview, setMappingPlan, loadDemoSession, generateBeatmap, reviewCurrentBeatmap, recordHumanPlaytest, previewTool, learningTool, feedbackTool];
 
   function setStatus(status, detail) {
     window.__beatforgeWebMcp = { ...(window.__beatforgeWebMcp || {}), status, detail, tools };

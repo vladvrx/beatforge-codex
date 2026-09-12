@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+from .checkpoints import load_checkpoint
+from .safety import safe_hold_candidates
+from safety_contract import MIN_CHAIN_DURATION_BEATS
 
 try:
     from .environment import (
@@ -40,11 +43,11 @@ class RLMapGenerator:
         self.device = device
         if policy is not None:
             self.policy = policy
-        elif model_path is not None and model_path.exists():
-            self.policy = ActorCriticPolicy()
-            self.policy.load_state_dict(torch.load(model_path, map_location=device))
+            self.checkpoint_metadata = {"source": "supplied-policy", "checkpointSha256": None}
+        elif model_path is not None:
+            self.policy, self.checkpoint_metadata = load_checkpoint(model_path, device)
         else:
-            self.policy = ActorCriticPolicy()
+            raise ValueError("RL generation requires an explicit trained checkpoint (--rl-model)")
 
         self.policy.to(device)
         self.policy.eval()
@@ -56,6 +59,7 @@ class RLMapGenerator:
         bpm: float,
         difficulty: str = "Expert",
         deterministic: bool = True,
+        seed: int = 0,
     ) -> Dict[str, Any]:
         """Generate a complete v3.3.0 difficulty map using the RL policy."""
         env = BeatSaberEnv(
@@ -64,7 +68,8 @@ class RLMapGenerator:
             bpm=bpm,
             difficulty=difficulty,
         )
-        obs, _ = env.reset()
+        random = torch.Generator(device=self.device).manual_seed(seed)
+        obs, _ = env.reset(seed=seed)
 
         color_notes: List[Dict[str, Any]] = []
         bomb_notes: List[Dict[str, Any]] = []
@@ -80,7 +85,11 @@ class RLMapGenerator:
             t_mask_b = torch.tensor(mask_blue, dtype=torch.bool, device=self.device).unsqueeze(0)
 
             act_red, act_blue = self.policy.predict(
-                t_obs, mask_red=t_mask_r, mask_blue=t_mask_b, deterministic=deterministic
+                t_obs, mask_red=t_mask_r, mask_blue=t_mask_b, deterministic=deterministic,
+                blue_mask_fn=lambda selected: torch.as_tensor(
+                    env.blue_action_mask(int(selected.item()), mask_blue), dtype=torch.bool, device=self.device
+                ).unsqueeze(0),
+                generator=random,
             )
 
             current_beat = round(beat_grid[step], 4)
@@ -116,10 +125,13 @@ class RLMapGenerator:
                 break
 
         # Generate Arcs (Sliders) connecting smooth swing trajectories (Post-2022 v3 feature)
-        sliders = self._generate_arcs(color_notes)
+        sliders = self._generate_arcs(color_notes, audio_features, beat_grid)
 
         # Generate Chains (Burst Sliders) on sustained vibration onsets (Post-2022 v3 feature)
         burst_sliders = self._generate_chains(color_notes, audio_features, beat_grid)
+        sliders, burst_sliders, hold_relaxations = safe_hold_candidates(
+            color_notes, sliders, burst_sliders, audio_features, beat_grid, bpm, difficulty
+        )
 
         # Generate framing walls & bombs
         obstacles, bomb_notes = self._generate_obstacles_and_bombs(
@@ -150,11 +162,16 @@ class RLMapGenerator:
                 "_provenance": {
                     "poseSolver": "rl-policy-v1",
                     "format": "v3.3.0",
+                    "seed": seed,
+                    "checkpoint": self.checkpoint_metadata,
+                    "features": audio_features.get("provenance", {}),
+                    "holdRelaxations": hold_relaxations,
+                    "holdSelection": "audio-evidence-with-fixed-note-safety",
                 },
             },
         }
 
-    def _generate_arcs(self, color_notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _generate_arcs(self, color_notes: List[Dict[str, Any]], audio_features: Dict[str, Any], beat_grid: List[float]) -> List[Dict[str, Any]]:
         """Generate rich v3 Arcs / Sliders connecting held phrases and melodic transition swings."""
         arcs = []
         by_color: Dict[int, List[Dict[str, Any]]] = {0: [], 1: []}
@@ -166,9 +183,12 @@ class RLMapGenerator:
                 head = notes[i]
                 tail = notes[i + 1]
                 gap = float(tail["b"]) - float(head["b"])
+                index = int(np.searchsorted(beat_grid, float(head["b"])))
+                sustains = audio_features.get("sustainBeats", [])
+                sustained = index < len(sustains) and float(sustains[index]) >= gap
 
                 # Connect notes spaced 0.5 to 3.5 beats apart on melodic transitions
-                if 0.5 <= gap <= 3.5 and head["d"] != 8 and tail["d"] != 8 and (i % 2 == 0):
+                if sustained and 0.5 <= gap <= 3.5 and head["d"] != 8 and tail["d"] != 8 and (i % 2 == 0):
                     control = min(2.0, max(0.8, gap * 0.45))
                     arcs.append({
                         "b": float(head["b"]),
@@ -216,7 +236,7 @@ class RLMapGenerator:
         last_chain_beat = -999.0
         for i, note in enumerate(color_notes):
             b = float(note["b"])
-            step_idx = min(int(b * 4), len(onsets) - 1)
+            step_idx = int(np.searchsorted(beat_grid, b))
             
             drum_val = float(drums[step_idx]) if step_idx >= 0 and step_idx < len(drums) and isinstance(drums, list) else 0.0
             vocal_val = float(vocals[step_idx]) if step_idx >= 0 and step_idx < len(vocals) and isinstance(vocals, list) else 0.0
@@ -246,8 +266,8 @@ class RLMapGenerator:
                 ty = min(2, max(0, hy + chosen_dy))
                 
                 # Determine duration and slice count
-                dt = 0.0625 if (tx == hx and ty == hy) else (0.125 if abs(chosen_dx) + abs(chosen_dy) <= 1 else 0.25)
-                sc = 3 if dt <= 0.0625 else (4 if dt <= 0.125 else 5)
+                dt = MIN_CHAIN_DURATION_BEATS
+                sc = 5
                 
                 chains.append({
                     "b": b,
@@ -309,7 +329,7 @@ class RLMapGenerator:
             if beat < last_wall_end + min_wall_gap:
                 continue
 
-            step_idx = min(int(beat * 4), len(onsets) - 1)
+            step_idx = i
             intensity = onsets[step_idx] if 0 <= step_idx < len(onsets) else 0.5
             bass_val = bass_energy[step_idx] if 0 <= step_idx < len(bass_energy) else 0.5
 

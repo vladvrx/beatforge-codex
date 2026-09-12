@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -103,6 +103,7 @@ class ActorCriticPolicy(nn.Module):
         action: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         mask_red: Optional[torch.Tensor] = None,
         mask_blue: Optional[torch.Tensor] = None,
+        blue_mask_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ) -> Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute action sampling, log probability, entropy, and state value."""
         features = self.encoder(obs)
@@ -125,6 +126,9 @@ class ActorCriticPolicy(nn.Module):
         logits_blue = self.actor_blue(blue_in)
 
         # Apply Action Masking for Blue Hand
+        if blue_mask_fn is not None:
+            conditional_mask = blue_mask_fn(act_red)
+            mask_blue = conditional_mask if mask_blue is None else mask_blue & conditional_mask
         if mask_blue is not None:
             logits_blue = torch.where(mask_blue, logits_blue, torch.tensor(-1e8, device=logits_blue.device))
 
@@ -147,6 +151,8 @@ class ActorCriticPolicy(nn.Module):
         mask_red: Optional[torch.Tensor] = None,
         mask_blue: Optional[torch.Tensor] = None,
         deterministic: bool = False,
+        blue_mask_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        generator: Optional[torch.Generator] = None,
     ) -> Tuple[int, int]:
         """Inference action selection."""
         self.eval()
@@ -166,19 +172,20 @@ class ActorCriticPolicy(nn.Module):
             if deterministic:
                 act_red = torch.argmax(logits_red, dim=-1)
             else:
-                dist_red = Categorical(logits=logits_red)
-                act_red = dist_red.sample()
+                act_red = torch.multinomial(torch.softmax(logits_red, dim=-1), 1, generator=generator).squeeze(-1)
 
             red_emb = self.red_action_embed(act_red)
             blue_in = torch.cat([features, red_emb], dim=-1)
             logits_blue = self.actor_blue(blue_in)
+            if blue_mask_fn is not None:
+                conditional_mask = blue_mask_fn(act_red)
+                mask_blue = conditional_mask if mask_blue is None else mask_blue & conditional_mask
             if mask_blue is not None:
                 logits_blue = torch.where(mask_blue, logits_blue, torch.tensor(-1e8, device=logits_blue.device))
 
             if deterministic:
                 act_blue = torch.argmax(logits_blue, dim=-1)
             else:
-                dist_blue = Categorical(logits=logits_blue)
-                act_blue = dist_blue.sample()
+                act_blue = torch.multinomial(torch.softmax(logits_blue, dim=-1), 1, generator=generator).squeeze(-1)
 
             return int(act_red.item()), int(act_blue.item())

@@ -17,6 +17,15 @@ pip install -e ".[dev]"
 python skills\beat-saber-mapping\scripts\bootstrap.py --tier core
 ```
 
+For a guided Windows setup and a read-only dependency check, use the included launcher:
+
+```powershell
+.\Start-BeatForge.ps1 -Setup -Check
+.\Start-BeatForge.ps1
+```
+
+The launcher never downloads model weights during its doctor pass. It reports missing optional trackers and the local official corpus separately from the dependencies required to open Studio.
+
 Optional audio models (Beat This, BeatNet+, All-In-One, Demucs) need a working
 local PyTorch install. If `torch_python.dll` fails to load from the bootstrap
 `--target` cache, install Torch into the project venv instead of weakening
@@ -53,6 +62,20 @@ Full-mix consensus still requires median ≤ 10 ms, p95 ≤ 20 ms, and drift ≤
 The optional Codex review key lives in Windows Credential Manager as
 `BeatForge:codex`. The studio writes it from the Codex setup dialog; it never
 prints it back.
+
+## Feedback and self-improvement
+
+Studio records only explicit local feedback against the exact chart hash, audio hash, difficulty, tester, and optional beat range. Presets, A/B preferences, and accepted revisions are exportable from `/api/learning/export` without copying song audio. Suggestions are bounded adjustments derived from repeated feedback; they are shown for approval and never silently retrain or rewrite a map.
+
+The RL path requires an explicit checkpoint and uses the same sample-aligned analysis features for training, evaluation, and generation. Held-out reports and content hashes are required before a checkpoint can enter `data/model_registry`; promotion is blocked by hard validation failures or quality regressions, and `rollback` restores the prior immutable version. Training reward and structural QA are reported separately from human preferences and headset evidence.
+
+Run the regression suites with isolated temporary files:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests -q -m "not corpus and not network and not hardware and not codex"
+$env:PYTHONPATH = "skills/beat-saber-mapping/scripts"
+.venv\Scripts\python.exe -m pytest skills/beat-saber-mapping/tests -q -m "not corpus"
+```
 
 ## Failure recovery
 

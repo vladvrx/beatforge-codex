@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -11,7 +12,33 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from .mapping_plan import normalize_mapping_plan
+
 PROGRESS_PREFIX = "BEATFORGE_PROGRESS\t"
+
+
+class PipelineCancelled(RuntimeError):
+    """The Studio job cancelled its mapper and child analysis processes."""
+
+
+def _stop_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+        process.wait()
 
 
 def _notify_progress(progress: Callable[..., None], stage: str, detail: str, percent: float | None = None) -> None:
@@ -57,7 +84,18 @@ def run_premium_pipeline(
     cover: Path | None = None,
     allow_unconfirmed: bool = False,
     difficulties: list[str] | None = None,
+    mapping_plan: dict[str, Any] | None = None,
+    engine: str = "premium",
+    rl_model: Path | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    analysis_dir: Path | None = None,
 ) -> dict[str, Any]:
+    if engine not in {"premium", "rl"}:
+        raise ValueError("engine must be premium or rl")
+    if engine == "rl" and (rl_model is None or not Path(rl_model).is_file()):
+        raise ValueError("The RL engine requires an existing trained checkpoint")
+    if cancel_requested and cancel_requested():
+        raise PipelineCancelled("Mapping cancelled before the pipeline started")
     command = [
         sys.executable,
         str(SCRIPTS / "generate_map.py"),
@@ -88,8 +126,18 @@ def run_premium_pipeline(
         command += ["--continue-unconfirmed"]
     for name in difficulties or []:
         command += ["--difficulty", name]
+    if mapping_plan is not None:
+        plan = normalize_mapping_plan(mapping_plan)
+        plan_path = output / "_beatforge" / "mapping_request.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+        command += ["--mapping-plan", str(plan_path)]
+    if engine == "rl":
+        command += ["--engine", "rl", "--rl-model", str(Path(rl_model).resolve())]
+    if analysis_dir is not None:
+        command += ["--analysis-dir", str(analysis_dir)]
     progress("track", f"{title} · {artist}")
-    progress("pipeline", "starting official-premium generate_map")
+    progress("pipeline", f"starting {engine} generate_map")
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
     process = subprocess.Popen(
@@ -102,9 +150,11 @@ def run_premium_pipeline(
         errors="replace",
         env=environment,
         bufsize=1,
+        start_new_session=os.name != "nt",
     )
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    progress_errors: list[Exception] = []
 
     def consume_stderr() -> None:
         assert process.stderr is not None
@@ -120,7 +170,10 @@ def run_premium_pipeline(
                             percent = float(parts[3])
                         except ValueError:
                             percent = None
-                    _notify_progress(progress, parts[1], parts[2], percent)
+                    try:
+                        _notify_progress(progress, parts[1], parts[2], percent)
+                    except Exception as error:
+                        progress_errors.append(error)
 
     def consume_stdout() -> None:
         assert process.stdout is not None
@@ -131,9 +184,26 @@ def run_premium_pipeline(
     stdout_thread = threading.Thread(target=consume_stdout, daemon=True)
     stderr_thread.start()
     stdout_thread.start()
-    returncode = process.wait()
-    stderr_thread.join()
-    stdout_thread.join()
+    try:
+        while True:
+            if progress_errors:
+                raise progress_errors[0]
+            if cancel_requested and cancel_requested():
+                _stop_process_tree(process)
+                raise PipelineCancelled("Mapping cancelled")
+            try:
+                returncode = process.wait(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        _stop_process_tree(process)
+        raise
+    finally:
+        stderr_thread.join()
+        stdout_thread.join()
+    if progress_errors:
+        raise progress_errors[0]
     stdout_text = "".join(stdout_chunks)
     stderr_text = "".join(stderr_chunks)
     status = {

@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-from .environment import BeatSaberEnv
-from .models import ActorCriticPolicy, BeatForgeAudioEncoder
-from .rewards import CompositeReward, KinematicReward, MusicalReward, StyleReward
+def __getattr__(name):
+    # Feature extraction and benchmark metric helpers work without PyTorch.
+    if name in {"ActorCriticPolicy", "BeatForgeAudioEncoder"}:
+        from . import models
+        return getattr(models, name)
+    if name == "BeatSaberEnv":
+        from .environment import BeatSaberEnv
+        return BeatSaberEnv
+    if name in {"CompositeReward", "KinematicReward", "MusicalReward", "StyleReward"}:
+        from . import rewards
+        return getattr(rewards, name)
+    raise AttributeError(name)
 
 __all__ = [
     "BeatSaberEnv",

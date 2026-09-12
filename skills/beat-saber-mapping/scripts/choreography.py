@@ -25,6 +25,7 @@ from beatforge_core import (
 )
 from kinematics import bomb_on_swing_path, double_is_safe, swing_pose, transition_finding
 from official_corpus import map_features, normalize_beatmap
+from mapping_plan import build_section_plan, normalize_mapping_plan
 from safety_contract import (
     RECOVERY_BEATS,
     hold_span_beats,
@@ -184,6 +185,8 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
         )
         gap = config.peak_min_gap if is_peak else config.min_gap
         adaptive_gap = max(gap, gap * (1.15 - 0.35 * intensity))
+        density = float(section.get("density", 1.0))
+        adaptive_gap = max(gap, adaptive_gap / max(0.35, density))
         if beat - last_beat + 1e-9 < adaptive_gap:
             continue
         if any(
@@ -194,13 +197,16 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             continue
         strength = float(event.get("strength", 0.0))
         energies = event.get("stemEnergy") if isinstance(event.get("stemEnergy"), dict) else {}
+        dominant = str(section.get("dominantInstrument", "auto"))
+        if dominant != "auto" and dominant in energies:
+            strength *= 0.7 + 1.1 * max(0.0, min(1.0, float(energies[dominant])))
         layer = str(event.get("layer") or "")
         instrument = float(energies.get("drums") or 0.0) + float(energies.get("bass") or 0.0) + float(energies.get("guitar") or 0.0)
         vocal = float(energies.get("vocals") or 0.0)
         layered = bool(energies) and instrument >= vocal * 1.15 and layer in {"drums", "bass", "guitar", "piano", "other"}
         if difficulty in {"Expert", "ExpertPlus"} and layered:
             strength *= 1.35
-        threshold = base_threshold
+        threshold = base_threshold / max(0.35, density)
         if is_peak:
             threshold *= 0.88 if difficulty in {"Expert", "ExpertPlus"} else 0.94
         elif intensity < 0.4:
@@ -256,6 +262,15 @@ def select_intents(analysis: dict[str, Any], sections: dict[str, Any], difficult
             "layer": layer or "mix",
             "stemEnergy": energies,
         }
+        if "motifId" in section:
+            relative = beat - float(section.get("startBeat", 0.0))
+            motif_offset = int(section.get("motifOffset", 0))
+            payload.update({
+                "sectionId": section["id"], "motifId": section["motifId"],
+                "patternBeat": relative + motif_offset * 4.0,
+                "patternIndex": int(round(relative * 2.0)) + motif_offset,
+                "style": section.get("style", "balanced"),
+            })
         selected.append(payload)
         last_beat = beat
     return selected
@@ -433,6 +448,7 @@ def _candidate_notes(
     index: int,
     intensity: float,
     beat: float,
+    preference_beat: float | None = None,
 ) -> list[dict[str, Any]]:
     """Enumerate combo-first arrow poses. Dots are a rare reset, not the default cut."""
 
@@ -440,8 +456,9 @@ def _candidate_notes(
         home = (0, 1)
     else:
         home = (3, 2)
-    preferred = swing_family(color, parity, beat)
-    lead = cut_for(color, parity, index, beat)
+    phase = beat if preference_beat is None else preference_beat
+    preferred = swing_family(color, parity, phase)
+    lead = cut_for(color, parity, index, phase)
     notes: list[dict[str, Any]] = []
     seen: set[tuple[int, int, int]] = set()
 
@@ -627,9 +644,14 @@ def _pose_domain(
     intensity = float(intent.get("intensity", 0.5))
     kind = intent["kind"]
     duration = float(intent.get("duration") or 0.0)
-    heads = _candidate_notes(color, parity, index, intensity, beat)
+    index = int(intent.get("patternIndex", index)) + int(intent.get("candidateVariant", 0))
+    phase = float(intent.get("patternBeat", beat))
+    heads = _candidate_notes(color, parity, index, intensity, beat, preference_beat=phase)
+    if intent.get("style") in {"flow", "chill"}:
+        home_x = 0.5 if color == 0 else 2.5
+        heads.sort(key=lambda head: abs(float(head["x"]) - home_x) + (0.5 if int(head["d"]) in {2, 3, 8} else 0.0))
     if str(intent.get("layer") or "") == "combo-stack":
-        lead = cut_for(color, parity, index, beat)
+        lead = cut_for(color, parity, index, phase)
         if color == 0:
             pair_cells = ((1, 1), (0, 1), (1, 0), (1, 2))
         else:
@@ -667,7 +689,9 @@ def _joint_combined_domain(
 
     beat = float(intent["beat"])
     stack = str(intent.get("layer") or "") == "combo-stack"
-    lead_parity = int(beat // 4.0) % 2 if stack else (index + int(beat // 2.0)) % 2
+    pattern_beat = float(intent.get("patternBeat", beat))
+    pattern_index = int(intent.get("patternIndex", index)) + int(intent.get("candidateVariant", 0))
+    lead_parity = int(pattern_beat // 4.0) % 2 if stack else (pattern_index + int(pattern_beat // 2.0)) % 2
     buckets = {
         (color_id, parity): _pose_domain(intent, color_id, parity, index, bpm, recovery_beats)[:6]
         for color_id in (0, 1)
@@ -2500,12 +2524,13 @@ def score_candidate(database_path: Path | None, features: dict[str, Any]) -> dic
     }
 
 
-def generate_all(
+def _generate_single_pass(
     analysis: dict[str, Any],
     sections: dict[str, Any],
     seed: int,
     corpus_database: Path | None = None,
     difficulties: Sequence[str] | None = None,
+    candidate_variant: int = 0,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     generated: dict[str, dict[str, Any]] = {}
     report: dict[str, Any] = {"solver": {}, "difficulties": {}, "officialReferences": {}}
@@ -2513,6 +2538,8 @@ def generate_all(
     for difficulty in chosen:
         emit_progress("choreography", f"selecting {difficulty} intents from onsets and sections")
         intents = select_intents(analysis, sections, difficulty)
+        if candidate_variant:
+            intents = [{**intent, "candidateVariant": candidate_variant} for intent in intents]
         joint = None
         try:
             emit_progress("choreography", f"solving joint CP-SAT for {difficulty} ({len(intents)} events)")
@@ -2558,4 +2585,98 @@ def generate_all(
             target_features=candidate_features,
         )
         report["difficulties"][difficulty]["corpusRank"] = score_candidate(corpus_database, candidate_features)
+    return generated, report
+
+
+def rank_choreography_candidate(
+    beatmap: dict[str, Any], difficulty: str, bpm: float,
+    corpus_rank: dict[str, Any], reference: dict[str, Any],
+    expected_count: int,
+) -> dict[str, Any]:
+    """Score complete candidates only after running the unchanged structural gates."""
+    from beatforge_core import ValidationReport
+    from validate_map import validate_v3
+
+    validation = ValidationReport()
+    validate_v3(beatmap, f"{difficulty}Standard.dat", validation, bpm=bpm, difficulty=difficulty)
+    notes = beatmap.get("colorNotes", [])
+    errors = [issue.code for issue in validation.errors]
+    if expected_count and not notes:
+        errors.append("NO_PLAYABLE_NOTES")
+    events, _ = normalize_beatmap(beatmap)
+    features = map_features(events, bpm)
+    profile = reference.get("profile", {})
+    comparable = [name for name in ("p95Reach", "centerVisionRate", "medianSameHandGap") if name in profile]
+    profile_distance = sum(abs(float(features.get(name, 0.0)) - float(profile[name])) / max(0.25, abs(float(profile[name]))) for name in comparable) / max(1, len(comparable))
+    reference_score = 1.0 / (1.0 + profile_distance) if comparable else 0.5
+    corpus_score = float(corpus_rank.get("score", 50.0)) / 100.0
+    coverage = min(1.0, len(notes) / max(1, expected_count))
+    signatures = [(int(note["x"]), int(note["y"]), int(note["d"])) for note in notes]
+    repeats = sum(left == right for left, right in zip(signatures, signatures[1:]))
+    variety = 1.0 - repeats / max(1, len(signatures) - 1)
+    score = 100.0 * (0.4 * corpus_score + 0.25 * reference_score + 0.25 * coverage + 0.1 * variety)
+    return {
+        "score": round(score, 6), "hardErrors": sorted(set(errors)),
+        "eligible": not errors, "corpusScore": round(corpus_score * 100.0, 6),
+        "referenceScore": round(reference_score * 100.0, 6),
+        "eventCoverage": round(coverage, 6), "variety": round(variety, 6),
+        "features": features,
+    }
+
+
+def select_ranked_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    eligible = [candidate for candidate in candidates if candidate.get("eligible")]
+    if not eligible:
+        codes = sorted({code for candidate in candidates for code in candidate.get("hardErrors", [])})
+        raise ValueError("No candidate passed the unchanged safety gates: " + ", ".join(codes))
+    return max(eligible, key=lambda candidate: (candidate["score"], -candidate["index"]))
+
+
+def generate_all(
+    analysis: dict[str, Any], sections: dict[str, Any], seed: int,
+    corpus_database: Path | None = None,
+    difficulties: Sequence[str] | None = None,
+    mapping_plan: dict[str, Any] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    if mapping_plan is None:
+        return _generate_single_pass(analysis, sections, seed, corpus_database, difficulties)
+    controls = normalize_mapping_plan(mapping_plan)
+    planned = build_section_plan(analysis, sections, controls)
+    chosen = tuple(name for name in DIFFICULTIES if name in set(difficulties or DIFFICULTIES)) or DIFFICULTIES
+    generated: dict[str, dict[str, Any]] = {}
+    report: dict[str, Any] = {"solver": {}, "difficulties": {}, "officialReferences": {}, "candidateRanking": {}, "mappingPlan": planned}
+    for difficulty in chosen:
+        # Retrieve before generation so every candidate is compared with the same reference family.
+        reference = retrieve_official_references(corpus_database, difficulty, float(analysis["bpm"]))
+        intents = select_intents(analysis, planned, difficulty)
+        candidates = []
+        payloads: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
+        for index in range(controls["candidateCount"]):
+            emit_progress("choreography", f"{difficulty}: generating candidate {index + 1}/{controls['candidateCount']}")
+            try:
+                maps, trace = _generate_single_pass(analysis, planned, seed + index * 7919, corpus_database, (difficulty,), candidate_variant=index)
+                beatmap = maps[difficulty]
+                if controls["noBombs"]:
+                    beatmap["bombNotes"] = []
+                if controls["noWalls"]:
+                    beatmap["obstacles"] = []
+                ranked_map = beatmap
+                if len(analysis.get("beatGrid", [])) >= 2:
+                    from timing_export import project_map_timing
+                    ranked_map = project_map_timing(beatmap, analysis)
+                ranked_events, _ = normalize_beatmap(ranked_map)
+                corpus_rank = score_candidate(corpus_database, map_features(ranked_events, float(analysis["bpm"])))
+                rank = rank_choreography_candidate(ranked_map, difficulty, float(analysis["bpm"]), corpus_rank, reference, len(intents))
+                trace["difficulties"][difficulty]["corpusRank"] = corpus_rank
+                candidates.append({"index": index, **rank})
+                payloads[index] = (beatmap, trace)
+            except (RuntimeError, ValueError) as error:
+                candidates.append({"index": index, "eligible": False, "score": 0.0, "hardErrors": [str(error)]})
+        winner = select_ranked_candidate(candidates)
+        beatmap, trace = payloads[winner["index"]]
+        generated[difficulty] = beatmap
+        report["solver"][difficulty] = trace["solver"][difficulty]
+        report["difficulties"][difficulty] = trace["difficulties"][difficulty]
+        report["officialReferences"][difficulty] = reference
+        report["candidateRanking"][difficulty] = {"selectedIndex": winner["index"], "candidates": candidates}
     return generated, report
