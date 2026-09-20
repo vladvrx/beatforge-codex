@@ -37,7 +37,9 @@ def test_demo_audio_decodes_to_the_advertised_30_seconds() -> None:
     assert len(set(preview["waveform"])) > 100
     duration, peaks = waveform(DEMO / "song.ogg")
     assert preview["duration"] == duration
-    assert preview["waveform"] == peaks
+    # libsndfile/Vorbis builds can straddle a four-decimal rounding boundary.
+    # Keep every bin aligned and permit only one stored quantization step.
+    np.testing.assert_allclose(preview["waveform"], peaks, rtol=0, atol=0.00010001)
     assert preview["provenance"]["audio"]["sha256"] == hashlib.sha256((DEMO / "song.ogg").read_bytes()).hexdigest()
 
 
