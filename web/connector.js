@@ -23,8 +23,12 @@
     const response = await fetch(target.href, {...options, headers, credentials:'omit', redirect:'error', cache:'no-store'});
     let result;
     try { result = await response.json(); } catch { throw new Error('The gateway returned an unreadable response.'); }
-    if (!response.ok) throw new Error(response.status === 401 ? 'Session rejected or expired. Reconnect with a valid token.' :
-      typeof result.detail === 'string' ? result.detail : Array.isArray(result.detail) ? result.detail.map(issue=>issue.msg).join(' ') : `Gateway request failed (${response.status}).`);
+    if (!response.ok) {
+      const error = new Error(response.status === 401 ? 'Session rejected or expired. Reconnect with a valid token.' :
+        typeof result.detail === 'string' ? result.detail : Array.isArray(result.detail) ? result.detail.map(issue=>issue.msg).join(' ') : `Gateway request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     return result;
   }
   async function request(route, options) {
@@ -52,13 +56,27 @@
       if (!(audio instanceof File) || !audio.size || audio.size > 64*1024*1024) throw new Error('Choose an audio file up to 64 MiB.');
       uploading = true;
       try {
+        const uploadSession = session;
         let upload = uploads.get(audio);
+        let state;
+        if (upload) {
+          try { state = await request(`/api/uploads/${upload.id}`); }
+          catch (error) {
+            if (error.status !== 404 || session !== uploadSession) throw error;
+            // The gateway reclaimed an expired reservation. Other errors must
+            // remain visible instead of creating another upload or changing accounts.
+            upload = null;
+          }
+          if (state?.state === 'pending' && state.expires * 1000 <= Date.now()) upload = null;
+          if (!upload) uploads.delete(audio);
+        }
         if (!upload) {
           upload = await request('/api/uploads', {method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({filename:audio.name, size:audio.size})});
           uploads.set(audio, upload);
+          state = upload;
         }
-        const state = await request(`/api/uploads/${upload.id}`);
+        if (state.state === 'writing') throw new Error('This audio upload is still in progress. Retry when it finishes or times out.');
         if (state.state !== 'ready') {
           $('gatewayStatus').textContent = 'Uploading audio directly to your gateway…';
           await request(upload.uploadPath, {method:'PUT', headers:{'Content-Type':'application/octet-stream'}, body:audio});
