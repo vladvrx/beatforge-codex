@@ -91,6 +91,27 @@ def test_quota_and_permission(connection):
     assert connection.post('/api/uploads', json=payload).status_code == 422
 
 
+def test_new_reservation_reclaims_only_expired_pending_quota(connection, tmp_path):
+    store = ConnectorStore(tmp_path/'jobs.db')
+    pending = store.reserve_upload('alice', 'unused.wav', 64*1024*1024)
+    writing = store.reserve_upload('alice', 'active.wav', 64*1024*1024)
+    ready = store.reserve_upload('alice', 'finished.wav', 64*1024*1024)
+    fresh = store.reserve_upload('alice', 'fresh.wav', 64*1024*1024)
+    store.begin_upload('alice', writing['id'])
+    store.begin_upload('alice', ready['id'])
+    store.complete_upload('alice', ready['id'], 'a'*64)
+    with store.connect() as db:
+        db.execute('UPDATE uploads SET expires=0 WHERE id IN (?,?,?)',
+                   (pending['id'], writing['id'], ready['id']))
+    response = connection.post('/api/uploads', json={'filename':'replacement.wav', 'size':64*1024*1024})
+    assert response.status_code == 200
+    assert connection.get('/api/uploads/'+pending['id']).status_code == 404
+    assert store.get_upload('alice', writing['id'])['state'] == 'writing'
+    assert store.get_upload('alice', ready['id'])['state'] == 'ready'
+    assert store.get_upload('alice', fresh['id'])['state'] == 'pending'
+    assert connection.post('/api/uploads', json={'filename':'extra.wav','size':1}).status_code == 422
+
+
 def test_expired_reservation_and_parallel_writer_denied(connection, tmp_path):
     upload = connection.post('/api/uploads', json={'filename': 'track.wav', 'size': 4}).json()
     store = ConnectorStore(tmp_path/'jobs.db')

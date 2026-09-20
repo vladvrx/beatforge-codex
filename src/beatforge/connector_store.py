@@ -49,6 +49,9 @@ class ConnectorStore:
             raise ValueError('Audio must be between 1 byte and 64 MiB')
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            # Pending reservations have no committed bytes. Serialize expiry with
+            # begin_upload so cleanup can never race an active or completed writer.
+            db.execute("DELETE FROM uploads WHERE state='pending' AND expires<=?", (time.time(),))
             usage = db.execute('SELECT COUNT(*) AS count, COALESCE(SUM(size),0) AS bytes FROM uploads WHERE owner=?', (owner,)).fetchone()
             if usage['count'] >= 32 or usage['bytes'] + size > 256 * 1024 * 1024:
                 raise ValueError('Account upload quota reached')
