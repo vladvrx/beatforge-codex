@@ -7,11 +7,14 @@ import time
 import uuid
 import secrets
 import jwt
+import anyio
 from pathlib import Path
 
 from fastapi import HTTPException, Request
 
 from beatforge.connector_store import ConnectorStore
+
+ARTIFACT_TIMEOUT_SECONDS = 300
 
 ARTIFACT_TYPES = {'map.zip': 'application/zip', 'audio.ogg': 'audio/ogg', 'qa.json': 'application/json',
                   **{f'preview-{name}.json': 'application/json' for name in ('Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus')}}
@@ -60,13 +63,17 @@ class Artifacts:
         path = self.path(artifact_id)
         try:
             digest, received = hashlib.sha256(), 0
-            with path.open('xb') as stream:
-                async for chunk in request.stream():
-                    received += len(chunk)
-                    if received > size:
-                        raise HTTPException(413, 'Artifact exceeds its reserved size')
-                    stream.write(chunk)
-                    digest.update(chunk)
+            try:
+                with anyio.fail_after(ARTIFACT_TIMEOUT_SECONDS):
+                    with path.open('xb') as stream:
+                        async for chunk in request.stream():
+                            received += len(chunk)
+                            if received > size:
+                                raise HTTPException(413, 'Artifact exceeds its reserved size')
+                            stream.write(chunk)
+                            digest.update(chunk)
+            except TimeoutError as error:
+                raise HTTPException(408, 'Artifact upload timed out; retry with a valid lease') from error
             if received != size:
                 raise HTTPException(422, 'Artifact is incomplete')
             with self.store.connect() as db:

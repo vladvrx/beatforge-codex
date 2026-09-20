@@ -9,6 +9,38 @@ from test_connector_worker import setup_job
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_stalled_artifact_releases_quota_and_can_retry(tmp_path, monkeypatch):
+    import asyncio
+    import pytest
+    from fastapi import HTTPException, Request
+    from beatforge.connector_artifacts import Artifacts
+    from beatforge.connector_store import ConnectorStore
+    store = ConnectorStore(tmp_path/'jobs.db')
+    artifacts = Artifacts(store, tmp_path/'artifacts')
+    store.submit('alice', 'test', {})
+    job = store.claim('alice')
+    monkeypatch.setattr('beatforge.connector_artifacts.ARTIFACT_TIMEOUT_SECONDS', 0.02)
+    async def exercise():
+        delivered = False
+        async def stalled():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {'type':'http.request','body':b'ab','more_body':True}
+            await asyncio.sleep(10)
+        scope = {'type':'http','headers':[(b'content-length',b'4')]}
+        with pytest.raises(HTTPException) as failure:
+            await artifacts.receive('alice',job['id'],job['leaseToken'],'audio.ogg',Request(scope,stalled))
+        assert failure.value.status_code == 408
+        assert not list(artifacts.root.iterdir())
+        with store.connect() as db:
+            assert db.execute('SELECT COUNT(*) FROM artifacts').fetchone()[0] == 0
+        async def retry(): return {'type':'http.request','body':b'data','more_body':False}
+        await artifacts.receive('alice',job['id'],job['leaseToken'],'audio.ogg',Request(scope,retry))
+        assert len(artifacts.manifest('alice',job['id'],job['leaseToken'])) == 1
+    asyncio.run(exercise())
+
+
 def sample_map(destination):
     # Repository-owned synthetic fixture, not an uploaded archive.
     with zipfile.ZipFile(ROOT/'web/assets/demo/map.zip') as archive:
