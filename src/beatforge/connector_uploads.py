@@ -4,10 +4,14 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import anyio
+
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from beatforge.connector_store import ConnectorStore
+
+UPLOAD_TIMEOUT_SECONDS = 300
 
 
 class UploadRequest(BaseModel):
@@ -50,13 +54,17 @@ class Uploads:
         try:
             digest, received = hashlib.sha256(), 0
             # Exclusive creation also refuses stale files after an interrupted process.
-            with temporary.open('xb') as stream:
-                async for chunk in request.stream():
-                    received += len(chunk)
-                    if received > metadata['size']:
-                        raise HTTPException(413, 'Upload exceeds its reserved size')
-                    stream.write(chunk)
-                    digest.update(chunk)
+            try:
+                with anyio.fail_after(UPLOAD_TIMEOUT_SECONDS):
+                    with temporary.open('xb') as stream:
+                        async for chunk in request.stream():
+                            received += len(chunk)
+                            if received > metadata['size']:
+                                raise HTTPException(413, 'Upload exceeds its reserved size')
+                            stream.write(chunk)
+                            digest.update(chunk)
+            except TimeoutError as error:
+                raise HTTPException(408, 'Audio upload timed out; retry the upload') from error
             if received != metadata['size']:
                 raise HTTPException(422, 'Upload is incomplete')
             temporary.replace(path)

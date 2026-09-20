@@ -1,10 +1,41 @@
 import hashlib
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
 from beatforge.connector import Principal, create_app
 from beatforge.connector_store import ConnectorStore
+
+
+def test_stalled_audio_upload_releases_writer_and_removes_partial_file(tmp_path, monkeypatch):
+    from fastapi import HTTPException, Request
+    from beatforge.connector_uploads import Uploads
+    monkeypatch.setattr('beatforge.connector_uploads.UPLOAD_TIMEOUT_SECONDS', 0.02)
+    store = ConnectorStore(tmp_path/'jobs.db')
+    uploads = Uploads(store, tmp_path/'uploads')
+    reservation = store.reserve_upload('alice', 'track.wav', 4)
+
+    async def exercise():
+        delivered = False
+        async def receive():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {'type':'http.request', 'body':b'ab', 'more_body':True}
+            await asyncio.sleep(10)
+        request = Request({'type':'http', 'headers':[]}, receive)
+        with pytest.raises(HTTPException) as failure:
+            await uploads.receive('alice', reservation['id'], request)
+        assert failure.value.status_code == 408
+        assert store.get_upload('alice', reservation['id'])['state'] == 'pending'
+        assert not list(uploads.root.iterdir())
+        async def retry():
+            return {'type':'http.request', 'body':b'data', 'more_body':False}
+        result = await uploads.receive('alice', reservation['id'], Request({'type':'http','headers':[]}, retry))
+        assert result['state'] == 'ready'
+        assert uploads.path(reservation['id']).read_bytes() == b'data'
+    asyncio.run(exercise())
 
 
 @pytest.fixture
