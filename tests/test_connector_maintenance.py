@@ -1,7 +1,34 @@
 import pytest
+import json
 
 from beatforge.connector_maintenance import recover_uploads
 from beatforge.connector_store import ConnectorStore
+from beatforge.connector_maintenance import reclaim_artifacts
+from beatforge.connector_artifacts import Artifacts
+
+
+def test_obsolete_attempt_cleanup_preserves_results_and_current_leases(tmp_path):
+    store = ConnectorStore(tmp_path/'jobs.db')
+    artifacts = Artifacts(store,tmp_path/'artifacts')
+    store.submit('alice','running',{})
+    running = store.claim('alice')
+    finished = store.submit('bob','finished',{})
+    identifiers = ['1'*32,'2'*32,'3'*32]
+    with store.connect() as db:
+        db.execute("UPDATE jobs SET state='completed',result=? WHERE id=?",
+                   (json.dumps({'artifacts':[{'id':identifiers[0]}]}),finished['id']))
+        for identifier, job, lease in [(identifiers[0],finished['id'],'old'),
+                                       (identifiers[1],running['id'],running['leaseToken']),
+                                       (identifiers[2],running['id'],'abandoned')]:
+            db.execute('INSERT INTO artifacts(id,owner,job,lease,name,size) VALUES(?,?,?,?,?,?)',
+                       (identifier,'alice',job,lease,'audio.ogg',4))
+            artifacts.path(identifier).write_bytes(b'keep')
+    assert reclaim_artifacts(store.path)['obsoleteArtifacts'] == 1
+    assert all(artifacts.path(i).exists() for i in identifiers)
+    assert reclaim_artifacts(store.path,apply=True)['reservedBytes'] == 4
+    assert all(artifacts.path(i).read_bytes() == b'keep' for i in identifiers[:2])
+    assert not artifacts.path(identifiers[2]).exists()
+    assert reclaim_artifacts(store.path,apply=True)['obsoleteArtifacts'] == 0
 
 
 def test_offline_recovery_preserves_ready_audio_and_allows_retry(tmp_path):
