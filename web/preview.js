@@ -135,7 +135,26 @@
     }
   }
   async function loadDemo(){const ticket=++request;const base=window.BeatForgeApp?.staticDemo?'assets/demo/':'/assets/demo/';const payload=await json(base+'preview.json');if(ticket!==request)return;sample=payload;job=null;remote=false;const difficulty=payload.difficulties.includes('Hard')?'Hard':payload.difficulties[0];setData({...payload,chart:payload.charts[difficulty],difficulty,canRevise:false},base+'song.ogg');$('previewDownload').href=base+'map.zip';return payload;}
-  $('previewPlay').addEventListener('click',()=>audio.paused?audio.play().catch(error=>{$('previewMessage').textContent=error.message;}):audio.pause());
+  let lastAudioRecovery=0;
+  $('previewPlay').addEventListener('click',async()=>{
+    if(!audio.paused){audio.pause();return;}
+    if(remote && data?.audioExpiresAt && data.audioExpiresAt<=Date.now()/1000+10){
+      const loaded=await loadJob(job,data.difficulty,audio.currentTime,true);
+      if(!loaded)return;
+    }
+    audio.play().catch(error=>{$('previewMessage').textContent=error.message;});
+  });
+  audio.addEventListener('error',async()=>{
+    if(!data)return;
+    if(!remote||!job||Date.now()-lastAudioRecovery<30000){
+      $('previewMessage').textContent='Audio could not load. Check your connection and reopen this preview.';return;
+    }
+    lastAudioRecovery=Date.now();const previousJob=job;
+    $('previewMessage').textContent='Refreshing the private audio link…';
+    if(await loadJob(job,data.difficulty,audio.currentTime,true)){
+      if(remote&&job===previousJob)$('previewMessage').textContent='Audio link refreshed. Press Play to resume.';
+    }
+  });
   audio.addEventListener('play',()=>{cancelAnimationFrame(frame);loop();});audio.addEventListener('pause',()=>{cancelAnimationFrame(frame);draw();});audio.addEventListener('seeked',draw);audio.addEventListener('loadedmetadata',draw);audio.addEventListener('ended',draw);
   $('previewSpeed').addEventListener('change',()=>{audio.playbackRate=Number($('previewSpeed').value);});
   $('previewSeek').addEventListener('input',()=>{audio.currentTime=Number($('previewSeek').value);draw();});
