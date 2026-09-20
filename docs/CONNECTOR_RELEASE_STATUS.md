@@ -19,7 +19,7 @@ Status: implementation available in draft PR #1; public deployment and assistant
 
 - Select and configure the OAuth provider and hosting projects. Studio currently supports an in-memory private token session; browser OAuth sign-in is not implemented.
 - Exercise each named assistant with the same synthetic generation/revision workflow after the gateway is reachable over HTTPS. SDK transport checks alone do not establish these integrations.
-- Add a retention/recovery operation for exhausted storage and abandoned upload reservations before a sustained hosted pilot. Expired pending reservations are now reclaimed during new reservations, and stalled audio transfers time out with retry support. Ready data and writing reservations left by process crashes still require operator recovery.
+- Add retention for completed data and obsolete worker artifacts before a sustained hosted pilot. Expired pending reservations are reclaimed during new reservations, and stalled transfers time out with retry support. Interrupted audio reservations have an offline operator recovery command; see `CONNECTOR_RECOVERY.md`.
 - Verify expired audio-link renewal through the browser and complete responsive review of connected editorial states.
 
 No cloud resources were provisioned or credits spent. See `CONNECTOR_WORKER.md` and `CONNECTOR_EDITORIAL.md` for local workflow evidence and `clients/README.md` for the account verification procedure.
