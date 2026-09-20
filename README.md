@@ -4,9 +4,17 @@ BeatForge is a local Windows studio console for generating and reviewing five-di
 
 The WebMCP Challenge edition was built as a solo project with OpenAI Codex as the only AI coding assistant. In my own testing, MCP access makes generation iteration nearly 10 times faster than my previous manual workflow. I estimate the combined analysis, constraints, and review process produces roughly 100 times better consistency and playable quality. These are project observations, not a controlled industry benchmark.
 
-Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. The full FastAPI studio can still be run locally or deployed with `render.yaml`.
+Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. Run the full FastAPI Studio locally. `render.yaml` now hosts only the isolated authenticated connector gateway; it must not expose the local game-control API.
 
 Every run is sample-based, deterministic, and refusal-gated. Uncertain timing returns `needs_anchors`. Missing or unreadable artwork returns `needs_palette`. Same-hand flow conflicts, inward-facing handclaps, saber collisions, arc or chain ownership errors, bomb paths, walls, vision blocks, schema errors, and timing failures block the output.
+
+## Remote connector
+
+BeatForge includes shared REST and Streamable HTTP MCP operations for generation, QA, previews, section revisions, presets, comparisons and explicit feedback. Durable jobs are processed by an outbound local worker; private corpus assets stay on the PC. Studio can connect to review remote runs and use the editorial controls.
+
+Start with [hosting and budget setup](docs/HOSTING.md), [authentication](docs/CONNECTOR_AUTH.md), [worker setup](docs/CONNECTOR_WORKER.md), [editorial contracts](docs/CONNECTOR_EDITORIAL.md), and [Meta Muse, GPT/ChatGPT, Claude and Grok setup](docs/clients/README.md).
+
+Local HTTP MCP and synthetic generation have been tested. Hosted OAuth, individual assistant accounts and public deployment have not. Studio supports direct gateway uploads and Premium generation. Browser OAuth sign-in is still in progress. No hosting credits have been spent.
 
 ## Local setup
 

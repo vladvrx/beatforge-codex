@@ -1,0 +1,6 @@
+# Gateway only. The local worker installs .[studio,connector] separately.
+fastapi>=0.110,<1
+uvicorn[standard]>=0.27,<1
+pydantic>=2.6,<3
+mcp==1.30.0
+PyJWT[crypto]>=2.12,<3

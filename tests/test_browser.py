@@ -215,6 +215,7 @@ def test_playwright_webmcp_mock_registers_and_runs_collaboration_loop(studio_url
     try:
         opened.goto(studio_url, wait_until="networkidle")
         opened.wait_for_function("() => document.getElementById('webmcpStatus').textContent === 'WebMCP ready'")
+        opened.locator('details.connection-details > summary').click()
         result = opened.evaluate(
             """
             async () => {

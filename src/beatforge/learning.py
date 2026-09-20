@@ -10,10 +10,9 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from beatforge.feedback_guidance import derive_feedback_adjustment
 from beatforge.mapping_plan import normalize_mapping_plan
@@ -23,67 +22,10 @@ from beatforge.preview import chart_identity, chart_refs, confined, read_json
 router = APIRouter()
 LEARNING_FILE = ROOT / "data" / "learning.json"
 LEARNING_LOCK = threading.RLock()
-Difficulty = Literal["Easy", "Normal", "Hard", "Expert", "ExpertPlus"]
-FeedbackTag = Literal["too_dense", "too_sparse", "awkward", "tiring", "repetitive", "off_beat", "good_flow"]
-Tester = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
-Rating = Annotated[int, Field(strict=True, ge=1, le=5)]
-
-
-class Request(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-
-class Ratings(Request):
-    overall: Rating | None = None
-    flow: Rating | None = None
-    readability: Rating | None = None
-    musicality: Rating | None = None
-    variety: Rating | None = None
-
-
-class FeedbackRequest(Request):
-    jobId: str = Field(min_length=1, max_length=80)
-    difficulty: Difficulty
-    tester: Tester = "local"
-    ratings: Ratings = Field(default_factory=Ratings)
-    tags: list[FeedbackTag] = Field(default_factory=list, max_length=7)
-    notes: str = Field(default="", max_length=2000)
-    startBeat: float | None = Field(default=None, ge=0)
-    endBeat: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def meaningful_feedback(self):
-        if (self.startBeat is None) != (self.endBeat is None):
-            raise ValueError("Provide both startBeat and endBeat for passage feedback")
-        if self.startBeat is not None and self.endBeat <= self.startBeat:
-            raise ValueError("endBeat must follow startBeat")
-        if not self.ratings.model_dump(exclude_none=True) and not self.tags and not self.notes.strip():
-            raise ValueError("Add a rating, tag, or note")
-        return self
-
-
-class ComparisonRequest(Request):
-    preferredJob: str = Field(min_length=1, max_length=80)
-    alternateJob: str = Field(min_length=1, max_length=80)
-    difficulty: Difficulty
-    tester: Tester = "local"
-    notes: str = Field(default="", max_length=2000)
-
-
-class PresetRequest(Request):
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
-    mappingPlan: dict[str, Any]
-
-
-class SuggestionsRequest(Request):
-    mappingPlan: dict[str, Any] = Field(default_factory=dict)
-    tester: Tester = "local"
-    difficulty: Difficulty | None = None
-
-
-class AcceptanceRequest(Request):
-    tester: Tester = "local"
-    notes: str = Field(default="", max_length=2000)
+from beatforge.editorial_models import (
+    Difficulty, FeedbackTag, Tester, Rating, Request, Ratings, FeedbackRequest,
+    ComparisonRequest, PresetRequest, SuggestionsRequest, AcceptanceRequest,
+)
 
 
 def _now() -> str:

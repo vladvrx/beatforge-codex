@@ -15,3 +15,45 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:8px 0}summary:h
 @media(max-width:800px){.creative-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-copy{grid-template-columns:1fr}#chartCanvas{height:310px}.revision-fields{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.transport{gap:8px}.transport>.field{font-size:10px}.job-row{flex-wrap:wrap}#chartCanvas{height:270px}}
 @media(max-width:650px){.rating-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* Shared editorial treatment for the brief, playback and review panels. */
+:root{--dim:#959dab}
+.panel,.hero-copy{box-shadow:0 16px 40px rgba(0,0,0,.16)}
+.panel-head h2{font-weight:650;line-height:1.35}
+.panel-head .kicker{display:block;margin-bottom:5px}
+.connection-details{border-top:1px solid var(--line);padding-top:5px}
+.agent-activity{overflow-wrap:anywhere;white-space:normal}
+.studio-nav{padding:9px 12px;border-radius:8px;transition:background .15s,color .15s}
+.studio-nav:hover{background:rgba(255,255,255,.06)}
+.preview-panel{background:linear-gradient(155deg,#182131,#101319 60%);border-color:#34435b}
+.preview-panel .panel-head{padding-bottom:16px;border-bottom:1px solid rgba(148,170,207,.18)}
+.transport{padding:12px;background:rgba(5,9,16,.48);border:1px solid var(--line);border-radius:12px}
+.transport button,.section-buttons button{min-height:40px}
+.section-buttons button[aria-pressed="true"]{border-color:#97b7ff;background:#243c62;box-shadow:inset 0 -3px #97b7ff;color:#fff}
+.section-time{display:block;font:10px ui-monospace,monospace;color:var(--muted);margin-top:3px}
+.revision-editor{margin-top:20px;padding-top:12px}
+.learning-panel{border-top-color:#566584}
+textarea{font:inherit;line-height:1.6}
+textarea:focus-visible,summary:focus-visible,canvas[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:4px}
+section[id]{scroll-margin-top:24px}
+@media(max-width:650px){
+  .panel-head{flex-wrap:wrap;gap:10px}
+  .transport{padding:10px}
+  .transport>input{flex-basis:100%;order:3}
+  .preset-bar .field,.preset-bar input{min-width:0;max-width:100%;width:100%}
+  .revision-fields>*{min-width:0}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+/* Gateway connection follows the Studio's existing progressive disclosure. */
+.gateway-panel { margin: 20px 0; padding: 24px; }
+.gateway-panel summary { cursor: pointer; font-weight: 650; }
+.gateway-panel p { color: var(--muted, #a7b1c5); line-height: 1.6; }
+.gateway-connect { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.gateway-connect label { display: grid; gap: 8px; min-width: 0; }
+.gateway-connect input { width: 100%; min-width: 0; box-sizing: border-box; }
+.gateway-actions { display: flex; gap: 10px; margin-top: 12px; }
+.gateway-connect[hidden], .gateway-actions button[hidden] { display: none; }
+@media (max-width: 700px) { .gateway-connect { grid-template-columns: 1fr; } }

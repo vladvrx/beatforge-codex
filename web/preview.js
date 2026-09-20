@@ -5,7 +5,7 @@
   const canvas = $('chartCanvas'), ctx = canvas.getContext('2d');
   const wave = $('waveformCanvas'), wc = wave.getContext('2d');
   const audio = $('previewAudio');
-  let data = null, sample = null, job = null, request = 0, frame = 0;
+  let data = null, sample = null, job = null, request = 0, frame = 0, remote = false;
   let timing = [], width = 1000, height = 420, renderedNotes = 0;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -86,6 +86,11 @@
     if(!data)return;
     const duration=data.duration||1, peaks=data.waveform||[];
     const start=beatSeconds(Number($('revisionStart').value)||0),end=beatSeconds(Number($('revisionEnd').value)||0);
+    for(const button of $('previewSections').querySelectorAll('[data-section]')){
+      const section=data.sections[Number(button.dataset.section)];
+      const selected=String(Number($('revisionStart').value)===section.startBeat && Number($('revisionEnd').value)===section.endBeat);
+      if(button.getAttribute('aria-pressed')!==selected)button.setAttribute('aria-pressed',selected);
+    }
     wc.fillStyle='rgba(103,147,255,.18)';wc.fillRect(start/duration*w,0,(end-start)/duration*w,h);
     wc.strokeStyle='#6980b0';wc.beginPath();peaks.forEach((p,i)=>{const x=i/peaks.length*w;wc.moveTo(x,h/2-p*(h/2-5));wc.lineTo(x,h/2+p*(h/2-5));});wc.stroke();
     wc.strokeStyle='#54668a';for(const section of data.sections||[]){const x=beatSeconds(section.startBeat||0)/duration*w;wc.beginPath();wc.moveTo(x,0);wc.lineTo(x,h);wc.stroke();}
@@ -94,32 +99,33 @@
   function resize(){const dpr=window.devicePixelRatio||1;width=canvas.clientWidth;height=canvas.clientHeight;canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);wave.width=wave.clientWidth*dpr;wave.height=wave.clientHeight*dpr;wc.setTransform(dpr,0,0,dpr,0,0);draw();}
   function loop(){draw();if(!audio.paused)frame=requestAnimationFrame(loop);}
   function setData(next, source){
+    const keepRange=Boolean(data && (data.audioHash && data.audioHash===next.audioHash || !source || audio.getAttribute('src')===source));
     data=next;timing=buildTiming(data.chart,data.bpm,data.offsetSeconds);$('previewPanel').hidden=false;
     const oldTime=audio.currentTime||0;
     if(source && audio.getAttribute('src')!==source){audio.pause();audio.src=source;audio.load();}else audio.currentTime=oldTime;
     $('previewTitle').textContent=`${data.title} · ${data.artist}`;
     $('previewDifficulty').innerHTML=data.difficulties.map(name=>`<option${name===data.difficulty?' selected':''}>${esc(name)}</option>`).join('');
     $('previewSeek').max=String(data.duration);$('previewTiming').textContent=data.timingVerified?'Timing verified':'Timing needs confirmation';
-    $('previewSections').innerHTML=(data.sections||[]).map((section,i)=>`<button type="button" class="secondary" data-section="${i}">${esc(section.label||section.type||`Section ${i+1}`)}</button>`).join('');
+    $('previewSections').innerHTML=(data.sections||[]).map((section,i)=>`<button type="button" class="secondary" aria-pressed="false" data-section="${i}">${esc(section.label||section.type||`Section ${i+1}`)} <span class="section-time">${stamp(beatSeconds(section.startBeat))}</span></button>`).join('');
     $('previewFindings').innerHTML=(data.findings||[]).length?(data.findings||[]).slice(0,30).map((f,i)=>`<button class="finding" data-finding="${i}">${f.beat!=null?`Beat ${Number(f.beat).toFixed(2)} · `:''}${esc(f.code)}: ${esc(f.message)}</button>`).join(''):'<span class="agent-helper">No reported findings for this difficulty. Headset feedback is still needed.</span>';
     $('previewPlay').disabled=false;$('acceptRevision').hidden=!data.provenance?.revision;
-    $('reviseSection').disabled=!data.canRevise;$('revisionHelp').textContent=data.canRevise?'Creates a new revision. Notes outside this range stay unchanged; the complete result is validated.':'The sample can be explored here. Section regeneration is available for completed local mapping runs.';
+    $('reviseSection').disabled=!data.canRevise;$('revisionHelp').textContent=data.canRevise?(remote?'Creates a separate revision on the original worker using its retained analysis. Content outside the selected range is preserved and the full map is validated.':'Creates a new revision. Notes outside this range stay unchanged; the complete result is validated.'):'The sample can be explored here. Section regeneration is available for completed local mapping runs.';
     $('previewDownload').hidden=!sample;$('previewDownload').href=sample?'assets/demo/map.zip':'#';
-    $('revisionStart').value='0';$('revisionEnd').value=String(Math.min(16,Math.floor(secondsBeat(data.duration))));
+    if(!keepRange){$('revisionStart').value='0';$('revisionEnd').value=String(Math.min(16,Math.floor(secondsBeat(data.duration))));}
     resize();
   }
   async function json(url){const response=await fetch(url);if(!response.ok){let body;try{body=await response.json();}catch{}throw new Error(body?.detail||`Preview request failed (${response.status})`);}return response.json();}
-  async function loadJob(id,difficulty,atTime){
+  async function loadJob(id,difficulty,atTime,fromGateway=false){
     const ticket=++request;
     try{
-      const payload=await json(`/api/jobs/${id}/preview${difficulty?'?difficulty='+encodeURIComponent(difficulty):''}`);
+      const payload=fromGateway ? await window.BeatForgeConnection.preview(id,difficulty) : await json(`/api/jobs/${id}/preview${difficulty?'?difficulty='+encodeURIComponent(difficulty):''}`);
       if(ticket!==request)return false;
       const position=atTime??(job===id?audio.currentTime:0);
-      job=id;sample=null;setData(payload,payload.audioUrl);
+      remote=fromGateway;job=id;sample=null;setData(payload,payload.audioUrl);
       const seek=()=>{if(ticket!==request)return;audio.currentTime=clamp(position,0,payload.duration);draw();};
       if(audio.readyState>=1)seek();else audio.addEventListener('loadedmetadata',seek,{once:true});
       $('previewMessage').textContent='';
-      window.dispatchEvent(new CustomEvent('beatforge:preview',{detail:{jobId:job,difficulty:data.difficulty}}));
+      window.dispatchEvent(new CustomEvent('beatforge:preview',{detail:{jobId:remote?null:job,remoteJobId:remote?job:null,difficulty:data.difficulty}}));
       return true;
     }catch(error){
       if(ticket!==request)return false;
@@ -128,13 +134,13 @@
       return false;
     }
   }
-  async function loadDemo(){const ticket=++request;const base=window.BeatForgeApp?.staticDemo?'assets/demo/':'/assets/demo/';const payload=await json(base+'preview.json');if(ticket!==request)return;sample=payload;job=null;const difficulty=payload.difficulties.includes('Hard')?'Hard':payload.difficulties[0];setData({...payload,chart:payload.charts[difficulty],difficulty,canRevise:false},base+'song.ogg');$('previewDownload').href=base+'map.zip';return payload;}
+  async function loadDemo(){const ticket=++request;const base=window.BeatForgeApp?.staticDemo?'assets/demo/':'/assets/demo/';const payload=await json(base+'preview.json');if(ticket!==request)return;sample=payload;job=null;remote=false;const difficulty=payload.difficulties.includes('Hard')?'Hard':payload.difficulties[0];setData({...payload,chart:payload.charts[difficulty],difficulty,canRevise:false},base+'song.ogg');$('previewDownload').href=base+'map.zip';return payload;}
   $('previewPlay').addEventListener('click',()=>audio.paused?audio.play().catch(error=>{$('previewMessage').textContent=error.message;}):audio.pause());
   audio.addEventListener('play',()=>{cancelAnimationFrame(frame);loop();});audio.addEventListener('pause',()=>{cancelAnimationFrame(frame);draw();});audio.addEventListener('seeked',draw);audio.addEventListener('loadedmetadata',draw);audio.addEventListener('ended',draw);
   $('previewSpeed').addEventListener('change',()=>{audio.playbackRate=Number($('previewSpeed').value);});
   $('previewSeek').addEventListener('input',()=>{audio.currentTime=Number($('previewSeek').value);draw();});
   wave.addEventListener('click',event=>{if(data){audio.currentTime=clamp((event.clientX-wave.getBoundingClientRect().left)/wave.clientWidth,0,1)*data.duration;draw();}});
-  $('previewDifficulty').addEventListener('change',()=>{const difficulty=$('previewDifficulty').value;if(sample)setData({...sample,chart:sample.charts[difficulty],difficulty,canRevise:false},null);else if(job)loadJob(job,difficulty);});
+  $('previewDifficulty').addEventListener('change',()=>{const difficulty=$('previewDifficulty').value;if(sample)setData({...sample,chart:sample.charts[difficulty],difficulty,canRevise:false},null);else if(job)loadJob(job,difficulty,undefined,remote);});
   $('previewSections').addEventListener('click',event=>{const target=event.target.closest('[data-section]');if(!target||!data)return;const section=data.sections[Number(target.dataset.section)];$('revisionStart').value=String(section.startBeat);$('revisionEnd').value=String(section.endBeat);audio.currentTime=Math.max(0,beatSeconds(section.startBeat));draw();});
   $('previewFindings').addEventListener('click',event=>{const target=event.target.closest('[data-finding]');if(!target||!data)return;const issue=data.findings[Number(target.dataset.finding)];if(issue.beat!=null)audio.currentTime=Math.max(0,beatSeconds(issue.beat)-1);draw();});
   for(const id of ['revisionStart','revisionEnd'])$(id).addEventListener('input',()=>drawWave(audio.currentTime));
@@ -142,8 +148,10 @@
   $('reviseSection').addEventListener('click',async()=>{
     if(!job||!data?.canRevise)return;
     $('reviseSection').disabled=true;$('previewMessage').textContent='Starting a new section revision…';audio.pause();
-    try{const mappingPlan=window.BeatForgeApp.creativePlan();mappingPlan.brief=$('revisionBrief').value.trim()||mappingPlan.brief;mappingPlan.density=Number($('revisionDensity').value);const payload={difficulty:data.difficulty,startBeat:Number($('revisionStart').value),endBeat:Number($('revisionEnd').value),baseHash:data.chartHash,seed:Number($('seed').value||42)+1,mappingPlan};const response=await fetch(`/api/jobs/${job}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));$('previewMessage').textContent='Revision started. Your original map is preserved.';window.BeatForgeApp.followJob(result.id);}catch(error){$('previewMessage').textContent=error.message;}finally{$('reviseSection').disabled=!data?.canRevise;}
+    try{const mappingPlan=window.BeatForgeApp.creativePlan();mappingPlan.brief=$('revisionBrief').value.trim()||mappingPlan.brief;mappingPlan.density=Number($('revisionDensity').value);const payload={difficulty:data.difficulty,startBeat:Number($('revisionStart').value),endBeat:Number($('revisionEnd').value),baseHash:data.chartHash,seed:Number($('seed').value||42)+1,mappingPlan};if(remote){await window.BeatForgeConnection.revise(job,payload);$('previewMessage').textContent='Revision queued on your original worker. The original map is preserved.';return;}const response=await fetch(`/api/jobs/${job}/revise`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));$('previewMessage').textContent='Revision started. Your original map is preserved.';window.BeatForgeApp.followJob(result.id);}catch(error){$('previewMessage').textContent=error.message;}finally{$('reviseSection').disabled=!data?.canRevise;}
   });
   new ResizeObserver(resize).observe(canvas);
-  window.BeatForgePreview={loadJob,loadDemo,getState:()=>data?{jobId:job,difficulty:data.difficulty,chartHash:data.chartHash,time:audio.currentTime,notes:data.chart.colorNotes.length,canRevise:data.canRevise}:null};
+  window.BeatForgePreview={loadJob,loadDemo,loadRemoteJob:(id,difficulty)=>loadJob(id,difficulty,undefined,true),
+    clearRemote:()=>{if(!remote)return;++request;audio.pause();audio.removeAttribute('src');audio.load();data=null;sample=null;job=null;remote=false;ctx.clearRect(0,0,width,height);wc.clearRect(0,0,wave.width,wave.height);$('previewTitle').textContent='Load a sample or completed run';$('previewPlay').disabled=true;$('reviseSection').disabled=true;$('previewSections').replaceChildren();$('previewFindings').replaceChildren();$('previewMessage').textContent='Gateway disconnected.';$('previewClock').textContent='0:00 / 0:00';$('previewTiming').textContent='No chart loaded';$('previewSeek').value='0';$('previewDifficulty').replaceChildren();},
+    getState:()=>data?{jobId:remote?null:job,remoteJobId:remote?job:null,difficulty:data.difficulty,chartHash:data.chartHash,time:audio.currentTime,notes:data.chart.colorNotes.length,canRevise:data.canRevise}:null};
 })();

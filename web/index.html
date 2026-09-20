@@ -51,10 +51,8 @@
     .hero-copy, .panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(24,27,34,.96), rgba(14,16,21,.96)); border-radius: var(--radius); }
     .hero-copy { padding: clamp(18px, 2.4vw, 28px); min-height: 0; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(300px, 460px); gap: 22px; align-items: center; position: relative; overflow: hidden; }
     h1 { display: flex; justify-content: center; align-items: center; margin: 0; width: 100%; min-height: clamp(140px, 22vw, 210px); font-size: clamp(38px, 5.2vw, 72px); }
-    .hero-logo { display: grid; place-items: center; width: min(460px, 100%); height: clamp(140px, 22vw, 210px); overflow: hidden; margin: 0 auto;
-      -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%);
-      mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%); }
-    .hero-logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; mix-blend-mode: screen; filter: saturate(1.08) contrast(1.06); }
+    .hero-logo { display: grid; place-items: center; width: min(460px, 100%); height: clamp(140px, 22vw, 210px); margin: 0 auto; }
+    .hero-logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
     .panel { padding: 22px; }
     .hero-form { min-width: 0; padding: 0; border: 0; background: transparent; }
     .hero-form .dropzone { min-height: 88px; padding: 18px 16px; }
@@ -224,7 +222,7 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <h1 id="hero-title">
-          <span class="hero-logo"><img src="/assets/beat-forge-logo.png" alt="BeatForge"></span>
+          <span class="hero-logo"><img src="/assets/beat-forge-logo.png?v=transparent-1" alt="BeatForge"></span>
         </h1>
         <section class="panel hero-form" aria-labelledby="upload-title">
         <div class="panel-head">
@@ -290,14 +288,14 @@
       <p>Give the agent musical intent in plain language. It can apply a typed plan, start the visible run, read safety gates, and record evidence you explicitly supply after playing. The agent never receives your song audio through these tools and never invents a clearance.</p>
       <label class="field">Creative brief<textarea id="creativeBrief" maxlength="1000" placeholder="e.g. Neon, syncopated, high-energy chorus; keep Expert readable for a first-time player."></textarea></label>
       <div class="creative-controls" id="creativeControls">
-        <label class="field">Style<select id="planStyle"><option value="auto">From brief / balanced</option><option value="flow">Flow</option><option value="tech">Tech</option><option value="chill">Chill</option><option value="balanced">Balanced</option></select></label>
-        <label class="field">Follow instrument<select id="planInstrument"><option value="auto">From brief / full mix</option><option>drums</option><option>bass</option><option>vocals</option><option>guitar</option><option>piano</option><option>other</option></select></label>
-        <label class="field">Note density<select id="planDensity"><option value="auto">From brief / default</option><option value="0.75">Lighter</option><option value="1">Standard</option><option value="1.25">Denser</option><option value="1.5">Very dense</option></select></label>
+        <label class="field">Style<select id="planStyle"><option value="auto">From brief</option><option value="flow">Flow</option><option value="tech">Tech</option><option value="chill">Chill</option><option value="balanced">Balanced</option></select></label>
+        <label class="field">Follow instrument<select id="planInstrument"><option value="auto">From brief</option><option>drums</option><option>bass</option><option>vocals</option><option>guitar</option><option>piano</option><option>other</option></select></label>
+        <label class="field">Note density<select id="planDensity"><option value="auto">From brief</option><option value="0.75">Lighter</option><option value="1">Standard</option><option value="1.25">Denser</option><option value="1.5">Very dense</option></select></label>
         <label class="field">Intensity<select id="planIntensity"><option value="auto">Default</option><option value="0.75">Gentle</option><option value="1">Standard</option><option value="1.25">Strong</option></select></label>
-        <label class="field">Verse density<select id="planVerse"><option value="auto">From brief / default</option><option value="0.75">Lighter verses</option><option value="1">Standard</option><option value="1.25">Denser verses</option></select></label>
-        <label class="field">Chorus density<select id="planChorus"><option value="auto">From brief / default</option><option value="0.75">Lighter choruses</option><option value="1">Standard</option><option value="1.25">Denser choruses</option></select></label>
-        <label class="field">Bombs<select id="planBombs"><option value="auto">From brief / default</option><option value="hide">No bombs</option><option value="allow">Allow</option></select></label>
-        <label class="field">Walls<select id="planWalls"><option value="auto">From brief / default</option><option value="hide">No walls</option><option value="allow">Allow</option></select></label>
+        <label class="field">Verse density<select id="planVerse"><option value="auto">From brief</option><option value="0.75">Lighter verses</option><option value="1">Standard</option><option value="1.25">Denser verses</option></select></label>
+        <label class="field">Chorus density<select id="planChorus"><option value="auto">From brief</option><option value="0.75">Lighter choruses</option><option value="1">Standard</option><option value="1.25">Denser choruses</option></select></label>
+        <label class="field">Bombs<select id="planBombs"><option value="auto">From brief</option><option value="hide">No bombs</option><option value="allow">Allow</option></select></label>
+        <label class="field">Walls<select id="planWalls"><option value="auto">From brief</option><option value="hide">No walls</option><option value="allow">Allow</option></select></label>
       </div>
       <div class="agent-helper" id="planHelp">Try “lighter verses, denser chorus, follow drums, no bombs”. Explicit controls override the brief. Other prose is saved as a note.</div>
       <div class="preset-bar"><label class="field">Saved style<select id="savedPreset"><option value="">Choose a preset</option></select></label><input id="presetName" aria-label="New preset name" placeholder="Name this style" maxlength="80"><button class="secondary" id="savePreset" type="button">Save style</button></div>
@@ -307,10 +305,10 @@
         <button class="secondary" id="loadDemo" type="button">Load collaboration demo</button>
         <span class="agent-helper">Explore a real synthetic 30-second groove and download its sample map.</span>
       </div>
-      <div class="agent-inspector">
+      <details class="connection-details"><summary>Connection details and activity</summary><div class="agent-inspector">
         <div><span class="kicker">Exposed tools</span><div class="agent-tools" id="agentTools"><span class="agent-helper">Waiting for WebMCP…</span></div></div>
         <div><span class="kicker">Activity</span><div class="agent-activity" id="agentActivity" aria-live="polite">Human actions and agent calls will appear here.</div></div>
-      </div>
+      </div></details>
     </section>
 
     <section class="panel preview-panel" id="previewPanel" aria-labelledby="previewHeading">
@@ -658,7 +656,9 @@
     $('advancedSettings').addEventListener('change', applyAdvanced);
     applyAdvanced();
 
-    api('/api/beat-saber/status').then(data => {
+    if (staticDemo) {
+      $('gameStatus').textContent = 'Demo Studio · local generation available on your PC';
+    } else api('/api/beat-saber/status').then(data => {
       $('gameStatus').textContent = data.found ? 'Beat Saber library connected' : 'Beat Saber library not found';
       $('gameStatus').classList.toggle('ok', data.found);
     }).catch(() => { $('gameStatus').textContent = 'Beat Saber check unavailable'; });
@@ -759,7 +759,7 @@
         $('generate').disabled = false;
         return { ok: true, mode: 'rights-safe-demo', id: job.id, status: job.status, summary: job.summary, humanNextAction: 'Play or discuss the preview, then record only real human evidence.' };
       }
-      if (staticDemo) return setState('Open your local Studio to generate', 'This hosted page previews the sample. Run Start-BeatForge.ps1 on your PC to map your own audio.', 'bad'), {ok:false,error:'Generation requires the local BeatForge Studio'};
+      if (staticDemo && !window.BeatForgeConnection?.connected) return setState('Open your local Studio to generate', 'This hosted page previews the sample. Run Start-BeatForge.ps1 on your PC to map your own audio.', 'bad'), {ok:false,error:'Generation requires the local BeatForge Studio'};
       if (!audioFile) return setState('Select a mastered audio file first.', 'The mapper cannot run without local audio.', 'bad'), { ok: false, error: 'Select a mastered audio file first.' };
       const chosen = selectedDifficulties();
       if (!chosen.length) {
@@ -786,6 +786,10 @@
       $('decodeMeter').classList.remove('show');
       setState('Uploading local audio', reason || 'Starting the official-premium pipeline.', 'live', { algorithm: source === 'agent' ? 'webmcp · upload' : 'pipeline · upload' });
       try {
+        if (window.BeatForgeConnection?.connected) {
+          const result = await window.BeatForgeConnection.generate(form);
+          return {ok:true,id:result.id,status:result.state,mode:'remote-gateway',humanNextAction:'Review worker status in My runs, then inspect the published preview.'};
+        }
         const result = await api('/api/generate', { method: 'POST', body: form });
         jobId = result.id;
         $('jobLabel').textContent = `Job ${jobId}`;
@@ -810,6 +814,26 @@
     $('generate').addEventListener('click', () => startGeneration({ source: 'human' }));
     $('loadDemo').addEventListener('click', () => loadDemoSession().catch(error => setState('Sample unavailable', error.message, 'bad')));
 
+    function showRemoteJob(job) {
+      if (!window.BeatForgeConnection?.connected) return;
+      if (jobStream) jobStream.close(); clearTimeout(fallbackTimer); stopElapsedClock();
+      jobId=job.id;demoMode=false;installedPath=null;
+      lastJob={...job.request,id:job.id,status:job.result?.status||job.state,remote:true,detail:job.result?.message};
+      $('jobLabel').textContent=`Gateway job ${job.id}`;$('statusElapsed').textContent='';
+      $('statusTrack').textContent=[job.request.title,job.request.artist].filter(Boolean).join(' · ');
+      $('outputActions').hidden=true;$('playtestPanel').hidden=true;
+      const live=['queued','running'].includes(job.state);
+      $('generate').disabled=live;
+      setState(statusLabel(lastJob.status),job.result?.message||'The gateway has saved this run. Your local worker processes it when online.',live?'live':job.state==='failed'?'bad':'good',{algorithm:'gateway · premium'});
+    }
+    window.addEventListener('beatforge:connection',()=>{
+      if(jobStream)jobStream.close();clearTimeout(fallbackTimer);stopElapsedClock();
+      lastJob=null;jobId=null;demoMode=false;installedPath=null;
+      $('gameStatus').textContent=window.BeatForgeConnection?.connected?`Gateway Studio · ${window.BeatForgeConnection.origin}`:staticDemo?'Demo Studio · local generation available on your PC':'Local Studio';
+      $('outputActions').hidden=true;$('playtestPanel').hidden=true;$('generate').disabled=false;
+      $('jobLabel').textContent='NO JOB';
+      setState(window.BeatForgeConnection?.connected?'Gateway workspace connected':'Local workspace ready','Choose a track or open a saved run.','good');
+    });
     function followJob(id) {
       jobId = id; demoMode = false; installedPath = null;
       $('outputActions').hidden = true;
@@ -1014,13 +1038,14 @@
       if (!lastJob) return getStudioState({ includeActivity: options.detail === 'full' });
       let qa = lastJob.qa || null;
       if (!demoMode && jobId) {
-        try { qa = await api(`/api/jobs/${jobId}/critic`); } catch (error) { qa = { status: 'unavailable', detail: error.message }; }
+        try { qa = lastJob.remote ? await window.BeatForgeConnection.request(`/api/jobs/${jobId}/qa`) : await api(`/api/jobs/${jobId}/critic`); } catch (error) { qa = { status: 'unavailable', detail: error.message }; }
       }
       const state = getStudioState({ includeActivity: options.detail === 'full' });
       return { ...state, review: { qa, safety: 'Human headset evidence is still required; this review does not certify playability.' } };
     }
     async function recordPlaytest(input = {}) {
       if (!lastJob || !jobId) throw new Error('Generate a map before recording playtest evidence');
+      if(lastJob.remote)throw new Error('Gateway headset clearance is not supported. Use explicit mapping feedback without claiming a release.');
       const difficulty = String(input.difficulty || '');
       const speed = String(input.speed || '');
       const tester = String(input.tester || '').trim();
@@ -1072,10 +1097,11 @@
       } catch (error) { setState('Provider setup failed', error.message, 'bad'); }
     });
     function showReport(title, report) { $('reportTitle').textContent = title; $('reportBody').textContent = JSON.stringify(report, null, 2); $('reportDialog').showModal(); }
-    window.BeatForgeApp = { staticDemo, followJob, creativePlan: () => window.BeatForgeControls.getPlan(), getStudioState, applyMappingPlan, findSongMetadata, importSongPreview, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
+    window.BeatForgeApp = { staticDemo, followJob, showRemoteJob, creativePlan: () => window.BeatForgeControls.getPlan(), getStudioState, applyMappingPlan, findSongMetadata, importSongPreview, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
   </script>
   <script src="/web/studio.js"></script>
   <script src="/web/preview.js"></script>
+  <script src="/web/connector.js"></script>
   <script src="/web/webmcp.js"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import hashlib
 from pathlib import Path
 
 
@@ -19,10 +20,12 @@ def build() -> None:
     html = html.replace('href="/web/', 'href="')
     html = html.replace('"/assets/', '"assets/')
     html = html.replace("'/assets/", "'assets/")
-    (OUTPUT / "index.html").write_text(html, encoding="utf-8")
     for file in SOURCE.iterdir():
         if file.suffix in {'.js', '.css'}:
             shutil.copy2(file, OUTPUT / file.name)
+            revision = hashlib.sha256(file.read_bytes()).hexdigest()[:12]
+            html = html.replace(f'"{file.name}"', f'"{file.name}?v={revision}"')
+    (OUTPUT / "index.html").write_text(html, encoding="utf-8", newline="\n")
     assets = OUTPUT / "assets"
     shutil.copytree(SOURCE / "assets", assets, dirs_exist_ok=True)
 

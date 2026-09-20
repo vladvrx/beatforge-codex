@@ -12,7 +12,7 @@ from pathlib import Path
 
 def inspect() -> dict:
     checks = []
-    for module in ("beatforge", "fastapi", "uvicorn", "numpy", "soundfile", "ortools.sat.python.cp_model"):
+    for module in ("beatforge", "fastapi", "uvicorn", "numpy", "soundfile", "ortools.sat.python.cp_model", "UnityPy"):
         try:
             importlib.import_module(module)
             checks.append({"name": module, "ok": True, "required": True})
