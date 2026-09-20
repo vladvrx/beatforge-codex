@@ -136,7 +136,7 @@
     <form id="gatewayConnect" class="gateway-connect">
       <label>Gateway URL<input id="gatewayOrigin" type="url" placeholder="https://your-gateway.onrender.com" required autocomplete="off"></label>
       <label>Access token<input id="gatewayToken" type="password" required autocomplete="off" spellcheck="false"></label>
-      <button type="submit" id="gatewaySubmit">Connect</button>
+      <button type="submit" class="primary" id="gatewaySubmit">Connect workspace</button>
     </form>
     <div class="gateway-actions"><button type="button" class="secondary" id="gatewayRefresh" hidden>Refresh runs</button>
       <button type="button" class="secondary" id="gatewayDisconnect" hidden>Disconnect</button></div>
