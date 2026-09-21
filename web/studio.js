@@ -1,0 +1,101 @@
+/* Creative controls, recoverable run history, and explicit local preference learning. */
+(() => {
+  'use strict';
+  const $=id=>document.getElementById(id), app=window.BeatForgeApp;
+  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fields={planStyle:'style',planInstrument:'dominantInstrument',planDensity:'density',planIntensity:'intensity',planVerse:'verseDensity',planChorus:'chorusDensity',planBombs:'noBombs',planWalls:'noWalls'};
+  const learningPanel=document.createElement('section');learningPanel.id='learningPanel';learningPanel.className='panel learning-panel';
+  learningPanel.innerHTML=`<div class="panel-head"><div><span class="kicker">Learn from your feedback</span><h2>Make the next map better</h2></div><button class="secondary" id="refreshLearning" type="button">Refresh</button></div>
+    <p class="agent-helper" id="learningSummary">Feedback and comparisons are saved locally.</p><div class="notice" id="learningNext">Rate different charts to build a useful preference history.</div><p class="agent-helper" id="modelRegistryStatus">Checking the local model registry…</p>
+    <form id="feedbackForm"><div class="field-grid"><label class="field">Tester<input id="feedbackTester" value="local" maxlength="120" required></label><label class="field">Notes<input id="feedbackNotes" maxlength="2000" placeholder="What worked? What needs changing?"></label></div><div class="rating-grid" id="ratingFields"></div><div class="feedback-tags" id="feedbackTags"></div>
+    <div class="action-row"><button type="submit">Save feedback on previewed chart</button><button type="button" id="applySuggestion" disabled>Use suggested adjustments</button><button type="button" id="acceptRevision">Keep this revision</button><a href="/api/learning/export" download="beatforge-feedback.json" id="exportFeedback">Export feedback dataset</a></div></form>
+    <details id="compareControls"><summary>Compare two maps</summary><div class="preset-bar"><label class="field">Compare the preview with<select id="compareJob"><option value="">Choose another completed run</option></select></label><button class="secondary" id="compareLoad" type="button">Start comparison</button></div><p class="agent-helper" id="comparisonLabel">Both maps must use the same audio and difficulty.</p><div class="action-row"><button id="compareA" type="button" disabled>Preview A</button><button id="compareB" type="button" disabled>Preview B</button><button id="preferA" type="button" disabled>I prefer A</button><button id="preferB" type="button" disabled>I prefer B</button></div></details>
+    <p id="feedbackMessage" role="status"></p><p class="microcopy">Preference suggestions use explicit feedback. Model promotion requires a matching held-out benchmark and passing regression checks. A higher training reward is not a human playtest.</p>`;
+  document.querySelector('main.workspace').before(learningPanel);
+  $('ratingFields').innerHTML=['overall','flow','readability','musicality','variety'].map(name=>`<label class="field">${name[0].toUpperCase()+name.slice(1)}<select id="rating-${name}"><option value="">Not rated</option><option value="1">1 · Poor</option><option value="2">2</option><option value="3">3 · Okay</option><option value="4">4</option><option value="5">5 · Excellent</option></select></label>`).join('');
+  $('feedbackTags').innerHTML=Object.entries({too_dense:'Too dense',too_sparse:'Too sparse',awkward:'Awkward movement',tiring:'Too tiring',repetitive:'Repetitive',off_beat:'Off beat',good_flow:'Good flow'}).map(([value,label])=>`<label class="check"><input type="checkbox" name="feedbackTag" value="${value}">${label}</label>`).join('');
+  let presets=[], jobs=[], previewKey='', lastJob=null, suggested=null, loadingPlan=false;
+  const remote=()=>Boolean(window.BeatForgeConnection?.connected);
+  const pendingEvidence=new Map();
+  function editorPreview(){const state=window.BeatForgePreview?.getState();return state?{...state,jobId:remote()?state.remoteJobId:state.jobId}:null;}
+  async function api(url,body){
+    if(remote()){
+      const key=['/api/feedback','/api/comparisons'].includes(url)?url+JSON.stringify(body):null;
+      if(key){if(!pendingEvidence.has(key))pendingEvidence.set(key,crypto.randomUUID());body={...body,idempotencyKey:pendingEvidence.get(key)};}
+      const result=await window.BeatForgeConnection.request(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      // Reuse the key for identical evidence throughout this connection, including double clicks.
+      if(url==='/api/learning'){const saved=await window.BeatForgeConnection.request('/api/presets');return {...result,presets:saved.presets};}
+      if(url==='/api/jobs')return {...result,jobs:result.jobs.map(job=>({...job.request,id:job.id,revisionOf:job.request.revision?.parentJob,status:job.result?.status||job.state,localStatus:job.result?.status,canCancel:['queued','running'].includes(job.state)}))};
+      return result;
+    }
+    const response=await fetch(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail||result));return result;
+  }
+  function getPlan(){
+    const plan={schemaVersion:1,brief:$('engine').value==='rl'?'':$('creativeBrief').value.trim()};
+    for(const [id,key]of Object.entries(fields)){const value=$(id).value;if(value==='auto'||($('engine').value==='rl'&&!['noBombs','noWalls'].includes(key)))continue;plan[key]=['noBombs','noWalls'].includes(key)?value==='hide':['style','dominantInstrument'].includes(key)?value:Number(value);}
+    return plan;
+  }
+  function applyPlan(plan){
+    loadingPlan=true;
+    // A structured control update must not erase a separately authored brief.
+    if(Object.prototype.hasOwnProperty.call(plan,'brief')) $('creativeBrief').value=plan.brief||'';
+    for(const [id,key]of Object.entries(fields)){let value=plan[key];value=value==null?'auto':typeof value==='boolean'?(value?'hide':'allow'):String(value);if(![...$(id).options].some(option=>option.value===value)){const option=document.createElement('option');option.value=value;option.textContent=value;$(id).append(option);}$(id).value=value;}
+    loadingPlan=false;showPlan(plan);
+  }
+  function showPlan(plan){$('appliedPlan').hidden=false;const text=[`Style: ${plan.style||'balanced'}`,`density: ${plan.density||1}×`,`instrument: ${plan.dominantInstrument||'auto'}`,plan.noBombs?'no bombs':'',plan.noWalls?'no walls':'',...(plan.interpretation||[])].filter(Boolean).join(' · ');$('appliedPlan').textContent=text;}
+  let planTimer=null;
+  function resolvePlan(){if(loadingPlan||(app.staticDemo&&!remote()))return;clearTimeout(planTimer);planTimer=setTimeout(()=>{const plan=getPlan();api('/api/mapping-plan/resolve',plan).then(result=>{if(JSON.stringify(plan)===JSON.stringify(getPlan()))showPlan(result);}).catch(error=>{$('appliedPlan').hidden=false;$('appliedPlan').textContent=error.message;});},300);}
+  for(const id of [...Object.keys(fields),'creativeBrief'])$(id).addEventListener(id==='creativeBrief'?'input':'change',resolvePlan);
+  $('engine').addEventListener('change',()=>{const rl=$('engine').value==='rl';$('modelField').hidden=!rl;for(const [id,key]of Object.entries(fields))$(id).disabled=rl&&!['noBombs','noWalls'].includes(key);$('creativeBrief').disabled=rl;$('engineHelp').textContent=rl?'Experimental. Requires a trained checkpoint. This policy supports bomb/wall exclusions; musical controls use Premium.':'Premium uses musical controls and deterministic constraint solving.';});
+  window.BeatForgeControls={getPlan,applyPlan};
+  async function refreshHistory(){
+    if(app.staticDemo&&!remote()){$('jobHistory').textContent='Run history and generation are available in the local Studio.';return;}
+    try{const result=await api('/api/jobs');jobs=result.jobs;$('jobHistory').innerHTML=jobs.length?jobs.map(job=>`<div class="job-row"><div class="job-info"><strong>${esc(job.title)} ${job.revisionOf?'· revision':''}</strong><small>${esc(job.artist)} · ${esc(job.status)} · ${esc((job.difficulties||[]).join(', '))}</small></div><button class="secondary" data-open="${esc(job.id)}">Open</button>${job.canRetry?`<button class="secondary" data-retry="${esc(job.id)}">Retry</button>`:''}${job.canCancel?`<button class="secondary" data-cancel="${esc(job.id)}">Cancel</button>`:''}</div>`).join(''):'No runs yet. Load the sample or upload a song to begin.';
+      const selected=$('compareJob').value;$('compareJob').innerHTML='<option value="">Choose another completed run</option>'+jobs.filter(job=>['playtest_candidate','unconfirmed_pack'].includes(job.localStatus)).map(job=>`<option value="${esc(job.id)}">${esc(job.title)} · ${esc(job.id.slice(0,6))}${job.revisionOf?' · revision':''}</option>`).join('');$('compareJob').value=selected;
+    }catch(error){$('jobHistory').textContent=`History unavailable: ${error.message}`;}
+  }
+  $('refreshHistory').addEventListener('click',refreshHistory);
+  $('jobHistory').addEventListener('click',async event=>{const button=event.target.closest('button');if(!button)return;try{if(button.dataset.open){const job=jobs.find(j=>j.id===button.dataset.open);if(job?.mappingPlan)applyPlan(job.mappingPlan);if(remote()){if(job.localStatus!=='playtest_candidate')throw new Error('This run has no published preview yet.');await window.BeatForgePreview.loadRemoteJob(job.id,job.difficulties[0]);}else app.followJob(button.dataset.open);return;}button.disabled=true;if(button.dataset.retry){const result=await api(`/api/jobs/${button.dataset.retry}/retry`,{});app.followJob(result.id);}if(button.dataset.cancel)await api(`/api/jobs/${button.dataset.cancel}/cancel`,{});await refreshHistory();}catch(error){$('jobHistory').prepend(Object.assign(document.createElement('p'),{textContent:error.message}));}finally{button.disabled=false;}});
+  window.addEventListener('beatforge:history',refreshHistory);
+  window.addEventListener('beatforge:job',event=>{
+    const job=event.detail;lastJob=job;if(job.mappingPlan)showPlan(job.mappingPlan);
+    if(!job.demo&&job.summary){const key=job.id+':'+job.status;if(previewKey!==key){previewKey=key;window.BeatForgePreview?.loadJob(job.id);refreshHistory();}}
+    if(!job.demo){try{localStorage.setItem('beatforge.lastJob',job.id);}catch{}}
+  });
+  async function refreshLearning(){
+    $('feedbackForm').hidden=false;$('compareControls').hidden=false;$('savePreset').disabled=false;$('savedPreset').disabled=false;$('exportFeedback').hidden=false;
+    if(app.staticDemo&&!remote()){$('learningSummary').textContent='Your ratings, comparisons, and presets stay in your local Studio. Open it to start collecting feedback.';$('feedbackForm').hidden=true;$('compareControls').hidden=true;$('modelRegistryStatus').textContent='Model evaluation and training are available locally.';$('savePreset').disabled=true;$('savedPreset').disabled=true;return;}
+    try{const state=await api('/api/learning');presets=state.presets||[];$('savedPreset').innerHTML='<option value="">Choose a preset</option>'+presets.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');$('learningSummary').textContent=`${state.feedbackCount||0} ratings · ${state.comparisonCount||0} comparisons · ${state.acceptedRevisionCount||0} accepted revisions. Feedback is linked to the exact chart, not to a claimed headset clear.`;const guidance=await api('/api/learning/suggestions',{mappingPlan:getPlan(),tester:$('feedbackTester').value.trim()||'local',difficulty:window.BeatForgePreview?.getState()?.difficulty});suggested=guidance;$('learningNext').textContent=(guidance.reasons?.length?guidance.reasons:guidance.nextActions||['Rate three different charts to receive evidence-based suggestions.']).join(' ');$('applySuggestion').disabled=!guidance.ready||!Object.keys(guidance.changedFields||{}).length;
+      if(remote()){$('modelRegistryStatus').textContent='Gateway feedback is saved to your account. Training and model promotion are available in the local tools.';return;}
+      const model=state.modelRegistry||{};
+      $('modelRegistryStatus').textContent=model.status==='ready'?`Active model ${model.active.slice(0,12)} · ${model.modelCount} saved versions · ${model.trainingTrackCount} recorded training tracks. Leave the RL checkpoint blank to use this evaluated model.`:model.status==='invalid'?'Model registry needs repair: its integrity check failed. The saved files are preserved.':'No evaluated model is active. Train a candidate, evaluate it on held-out tracks, then initialize the registry. Premium generation is available now.';
+    }catch(error){$('learningSummary').textContent=`Feedback storage unavailable: ${error.message}`;$('applySuggestion').disabled=true;}
+  }
+  $('savePreset').addEventListener('click',async()=>{const name=$('presetName').value.trim();if(!name){$('presetName').focus();return;}try{await api('/api/presets',{name,mappingPlan:getPlan()});$('presetName').value='';await refreshLearning();}catch(error){$('appliedPlan').hidden=false;$('appliedPlan').textContent=error.message;}});
+  $('savedPreset').addEventListener('change',()=>{const preset=presets.find(p=>p.id===$('savedPreset').value);if(preset)applyPlan(preset.mappingPlan);});
+  $('feedbackForm').addEventListener('submit',async event=>{event.preventDefault();const preview=editorPreview();if(!preview?.jobId){$('feedbackMessage').textContent='Open a completed map from this workspace before rating it.';return;}const ratings={};for(const field of ['overall','flow','readability','musicality','variety']){const value=$('rating-'+field).value;if(value)ratings[field]=Number(value);}const payload={jobId:preview.jobId,difficulty:preview.difficulty,tester:$('feedbackTester').value.trim()||'local',ratings,tags:[...document.querySelectorAll('[name="feedbackTag"]:checked')].map(input=>input.value),notes:$('feedbackNotes').value.trim()};try{await api('/api/feedback',payload);$('feedbackMessage').textContent='Feedback saved for this exact chart. No headset clearance was recorded.';await refreshLearning();}catch(error){$('feedbackMessage').textContent=error.message;}});
+  $('applySuggestion').addEventListener('click',()=>{if(suggested?.ready){applyPlan(suggested.suggestedPlan);$('feedbackMessage').textContent='Suggested controls applied. Generate a new candidate to compare the result.';}});
+  let comparisonA=null,comparisonB=null,comparisonRemote=false,comparisonDifficulty=null;
+  $('compareLoad').addEventListener('click',async()=>{const current=editorPreview(),other=$('compareJob').value;if(!current?.jobId||!other||other===current.jobId){$('feedbackMessage').textContent='Open a map and select a different completed run.';return;}try{const [a,b]=await Promise.all([api(`/api/jobs/${current.jobId}/preview?difficulty=${current.difficulty}`),api(`/api/jobs/${other}/preview?difficulty=${current.difficulty}`)]);if(a.audioHash!==b.audioHash||a.bpm!==b.bpm||a.offsetSeconds!==b.offsetSeconds)throw new Error('Compare maps made from the same audio and timing.');if(JSON.stringify(a.chart)===JSON.stringify(b.chart))throw new Error('These charts are identical. Choose a different map.');comparisonA=current.jobId;comparisonB=other;comparisonRemote=remote();comparisonDifficulty=current.difficulty;$('compareA').disabled=false;$('compareB').disabled=false;$('preferA').disabled=false;$('preferB').disabled=false;$('comparisonLabel').textContent=`A ${comparisonA.slice(0,6)} · B ${comparisonB.slice(0,6)} · ${current.difficulty}. Switch at the same song position.`;}catch(error){$('feedbackMessage').textContent=error.message;}});
+  for(const side of ['A','B']){
+    $('compare'+side).addEventListener('click',()=>{const current=window.BeatForgePreview.getState();if(comparisonRemote!==remote()||!comparisonA||!comparisonB)return;window.BeatForgePreview.loadJob(side==='A'?comparisonA:comparisonB,comparisonDifficulty,current?.time,comparisonRemote);});
+    $('prefer'+side).addEventListener('click',async()=>{try{if(comparisonRemote!==remote()||!comparisonA||!comparisonB)throw new Error('Start a comparison first.');await api('/api/comparisons',{preferredJob:side==='A'?comparisonA:comparisonB,alternateJob:side==='A'?comparisonB:comparisonA,difficulty:comparisonDifficulty,tester:$('feedbackTester').value.trim()||'local',notes:$('feedbackNotes').value.trim()});$('feedbackMessage').textContent=`Preference for ${side} saved.`;await refreshLearning();}catch(error){$('feedbackMessage').textContent=error.message;}});
+  }
+  $('acceptRevision').addEventListener('click',async()=>{const current=window.BeatForgePreview?.getState();if(!current?.jobId)return;try{await api(`/api/jobs/${current.jobId}/accept-revision`,{tester:$('feedbackTester').value.trim()||'local',notes:$('feedbackNotes').value.trim()});$('feedbackMessage').textContent='Revision marked as kept. Its changes can inform future preference suggestions.';await refreshLearning();}catch(error){$('feedbackMessage').textContent=error.message;}});
+  $('exportFeedback').addEventListener('click',async event=>{
+    if(!remote())return;event.preventDefault();
+    try{const data=await api('/api/learning/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='beatforge-gateway-feedback.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){$('feedbackMessage').textContent=error.message;}
+  });
+  $('refreshLearning').addEventListener('click',refreshLearning);
+  window.BeatForgeLearning={refresh:refreshLearning,getSummary:()=>api('/api/learning'),recordFeedback:input=>api('/api/feedback',input)};
+  window.addEventListener('beatforge:connection',()=>{
+    pendingEvidence.clear();presets=[];jobs=[];suggested=null;comparisonA=null;comparisonB=null;comparisonDifficulty=null;
+    for(const id of ['compareA','compareB','preferA','preferB','applySuggestion'])$(id).disabled=true;
+    $('feedbackForm').reset();$('feedbackMessage').textContent='';$('comparisonLabel').textContent='Both maps must use the same audio and difficulty.';
+    $('savedPreset').replaceChildren();$('compareJob').replaceChildren();$('jobHistory').replaceChildren();
+    refreshHistory();refreshLearning();
+  });
+  $('acceptRevision').hidden=true;$('previewPlay').disabled=true;
+  refreshHistory();refreshLearning();
+  if(!app.staticDemo){try{const id=localStorage.getItem('beatforge.lastJob');if(id&&/^[a-f0-9]{12}$/.test(id))app.followJob(id);}catch{}}
+})();

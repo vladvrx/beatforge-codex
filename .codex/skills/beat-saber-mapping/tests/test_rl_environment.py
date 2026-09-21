@@ -179,7 +179,7 @@ def test_ppo_training_loop():
 
 
 def test_rl_map_generator_v3():
-    generator = RLMapGenerator()
+    generator = RLMapGenerator(policy=ActorCriticPolicy())
     bpm = 128.0
     grid = [round(i * 0.25, 4) for i in range(32 * 4)]  # 32 beats
     audio = {

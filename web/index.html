@@ -51,10 +51,8 @@
     .hero-copy, .panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(24,27,34,.96), rgba(14,16,21,.96)); border-radius: var(--radius); }
     .hero-copy { padding: clamp(18px, 2.4vw, 28px); min-height: 0; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(300px, 460px); gap: 22px; align-items: center; position: relative; overflow: hidden; }
     h1 { display: flex; justify-content: center; align-items: center; margin: 0; width: 100%; min-height: clamp(140px, 22vw, 210px); font-size: clamp(38px, 5.2vw, 72px); }
-    .hero-logo { display: grid; place-items: center; width: min(460px, 100%); height: clamp(140px, 22vw, 210px); overflow: hidden; margin: 0 auto;
-      -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%);
-      mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 46%, transparent 78%); }
-    .hero-logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; mix-blend-mode: screen; filter: saturate(1.08) contrast(1.06); }
+    .hero-logo { display: grid; place-items: center; width: min(460px, 100%); height: clamp(140px, 22vw, 210px); margin: 0 auto; }
+    .hero-logo img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
     .panel { padding: 22px; }
     .hero-form { min-width: 0; padding: 0; border: 0; background: transparent; }
     .hero-form .dropzone { min-height: 88px; padding: 18px 16px; }
@@ -210,17 +208,21 @@
       button:focus-visible, input:not([type="file"]):focus-visible, select:focus-visible, a:focus-visible { outline-width: 3px; }
     }
   </style>
+  <link rel="stylesheet" href="/web/studio.css">
 </head>
 <body>
   <div class="shell">
     <header class="topbar">
+      <a class="studio-nav" href="#previewPanel">Preview</a>
+      <a class="studio-nav" href="#historyPanel">My runs</a>
+      <a class="studio-nav" href="#learningPanel">Improve</a>
       <span class="system-chip" id="gameStatus" role="status">Checking Beat Saber library</span>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <h1 id="hero-title">
-          <span class="hero-logo"><img src="/assets/beat-forge-logo.png" alt="BeatForge"></span>
+          <span class="hero-logo"><img src="/assets/beat-forge-logo.png?v=transparent-1" alt="BeatForge"></span>
         </h1>
         <section class="panel hero-form" aria-labelledby="upload-title">
         <div class="panel-head">
@@ -273,7 +275,7 @@
           <button type="button" class="diff-toggle" data-difficulty="ExpertPlus" aria-pressed="true">Expert+</button>
         </div>
         <button class="primary" id="generate">Generate premium map</button>
-        <p class="microcopy">Generate always packs a download. Unverified timing does not block it. The AI timing buttons are an optional check, not a gate. Release candidate is not required to download. BeatForge will not fill either gap silently.</p>
+        <p class="microcopy">Generate analyzes timing and checks the chart. If timing needs confirmation, use anchors or explicitly continue unverified. Structural errors block installation. BeatForge will not fill either gap silently.</p>
       </section>
       </div>
     </section>
@@ -285,16 +287,44 @@
       </div>
       <p>Give the agent musical intent in plain language. It can apply a typed plan, start the visible run, read safety gates, and record evidence you explicitly supply after playing. The agent never receives your song audio through these tools and never invents a clearance.</p>
       <label class="field">Creative brief<textarea id="creativeBrief" maxlength="1000" placeholder="e.g. Neon, syncopated, high-energy chorus; keep Expert readable for a first-time player."></textarea></label>
+      <div class="creative-controls" id="creativeControls">
+        <label class="field">Style<select id="planStyle"><option value="auto">From brief</option><option value="flow">Flow</option><option value="tech">Tech</option><option value="chill">Chill</option><option value="balanced">Balanced</option></select></label>
+        <label class="field">Follow instrument<select id="planInstrument"><option value="auto">From brief</option><option>drums</option><option>bass</option><option>vocals</option><option>guitar</option><option>piano</option><option>other</option></select></label>
+        <label class="field">Note density<select id="planDensity"><option value="auto">From brief</option><option value="0.75">Lighter</option><option value="1">Standard</option><option value="1.25">Denser</option><option value="1.5">Very dense</option></select></label>
+        <label class="field">Intensity<select id="planIntensity"><option value="auto">Default</option><option value="0.75">Gentle</option><option value="1">Standard</option><option value="1.25">Strong</option></select></label>
+        <label class="field">Verse density<select id="planVerse"><option value="auto">From brief</option><option value="0.75">Lighter verses</option><option value="1">Standard</option><option value="1.25">Denser verses</option></select></label>
+        <label class="field">Chorus density<select id="planChorus"><option value="auto">From brief</option><option value="0.75">Lighter choruses</option><option value="1">Standard</option><option value="1.25">Denser choruses</option></select></label>
+        <label class="field">Bombs<select id="planBombs"><option value="auto">From brief</option><option value="hide">No bombs</option><option value="allow">Allow</option></select></label>
+        <label class="field">Walls<select id="planWalls"><option value="auto">From brief</option><option value="hide">No walls</option><option value="allow">Allow</option></select></label>
+      </div>
+      <div class="agent-helper" id="planHelp">Try “lighter verses, denser chorus, follow drums, no bombs”. Explicit controls override the brief. Other prose is saved as a note.</div>
+      <div class="preset-bar"><label class="field">Saved style<select id="savedPreset"><option value="">Choose a preset</option></select></label><input id="presetName" aria-label="New preset name" placeholder="Name this style" maxlength="80"><button class="secondary" id="savePreset" type="button">Save style</button></div>
+      <details class="engine-settings"><summary>Generation engine</summary><div class="field-grid"><label class="field">Engine<select id="engine"><option value="premium">Premium choreography</option><option value="rl">Trained policy · experimental</option></select></label><label class="field" id="modelField" hidden>Local checkpoint<input id="rlModel" placeholder="Full path to a trained .pt checkpoint"></label></div><p class="agent-helper" id="engineHelp">Premium uses musical controls and deterministic constraint solving.</p></details>
+      <div class="notice" id="appliedPlan" hidden></div>
       <div class="agent-toolbar">
         <button class="secondary" id="loadDemo" type="button">Load collaboration demo</button>
-        <span class="agent-helper">The demo uses a synthetic 30-second groove and does not create a Beat Saber pack.</span>
+        <span class="agent-helper">Explore a real synthetic 30-second groove and download its sample map.</span>
       </div>
-      <div class="agent-inspector">
+      <details class="connection-details"><summary>Connection details and activity</summary><div class="agent-inspector">
         <div><span class="kicker">Exposed tools</span><div class="agent-tools" id="agentTools"><span class="agent-helper">Waiting for WebMCP…</span></div></div>
         <div><span class="kicker">Activity</span><div class="agent-activity" id="agentActivity" aria-live="polite">Human actions and agent calls will appear here.</div></div>
-      </div>
+      </div></details>
     </section>
 
+    <section class="panel preview-panel" id="previewPanel" aria-labelledby="previewHeading">
+      <div class="panel-head"><div><span class="kicker">Listen, inspect, revise</span><h2 id="previewHeading">Map preview</h2></div><span class="chip" id="previewTiming">Load a sample or completed run</span></div>
+      <p id="previewTitle" class="preview-title">Hear the song. See the movement.</p>
+      <canvas id="chartCanvas" aria-label="Perspective preview of chart notes, arcs, chains, bombs and walls">The chart preview requires a browser with canvas support.</canvas>
+      <audio id="previewAudio" preload="metadata"></audio>
+      <div class="transport"><button type="button" class="secondary" id="previewPlay">Play</button><span id="previewClock">0:00 / 0:00</span><input id="previewSeek" type="range" min="0" max="30" step="0.01" value="0" aria-label="Preview position"><label class="field">Speed<select id="previewSpeed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option></select></label><label class="field">Difficulty<select id="previewDifficulty"><option>Hard</option></select></label></div>
+      <canvas id="waveformCanvas" aria-label="Song waveform. Use the position slider to seek with the keyboard."></canvas>
+      <div class="section-buttons" id="previewSections"></div>
+      <details class="revision-editor"><summary>Revise a section</summary><div class="revision-fields"><label class="field">From beat<input id="revisionStart" type="number" min="0" step="0.25" value="0"></label><label class="field">To beat<input id="revisionEnd" type="number" min="0" step="0.25" value="16"></label><label class="field">New density<select id="revisionDensity"><option value="0.75">Lighter</option><option value="1">Keep density</option><option value="1.25">Denser</option></select></label><button class="secondary" type="button" id="revisionHere">Select 8 bars here</button></div><label class="field">Revision instructions<input id="revisionBrief" maxlength="1000" placeholder="e.g. smooth flow, no bombs"></label><div class="action-row"><button id="reviseSection" type="button" disabled>Generate section revision</button></div><p class="agent-helper" id="revisionHelp">Complete a local mapping run to revise its sections.</p></details>
+      <div class="preview-findings" id="previewFindings"></div><div id="previewMessage" role="status"></div>
+      <div class="action-row"><a id="previewDownload" hidden>Download sample map</a></div>
+      <p class="microcopy">Preview geometry helps inspect a chart. Beat Saber scoring, spawn behavior and headset comfort still need a real playtest.</p>
+    </section>
+    <section class="panel" id="historyPanel"><div class="panel-head"><h2>My runs</h2><button class="secondary" id="refreshHistory" type="button">Refresh</button></div><div id="jobHistory" class="job-history">Your local runs will appear here.</div></section>
     <main class="workspace">
       <div class="stage-deck">
         <section class="panel" aria-labelledby="run-title">
@@ -304,7 +334,7 @@
             <div class="stage-log" id="stageLog">No events yet.</div>
           </div>
           <div class="timing-ai" id="timingAi" hidden>
-            <p class="microcopy">Timing models did not fully agree. Download is still available. You can ask OpenAI Codex to review the grid. Song audio is not sent.</p>
+            <p class="microcopy">Timing models did not fully agree. Download is still available. Release candidate is not required to download. You can ask OpenAI Codex to review the grid. Song audio is not sent.</p>
             <div class="palette-ai show" aria-label="OpenAI Codex timing review">
               <button class="secondary timing-ai-btn" type="button" data-provider="codex">Ask Codex</button>
               <button class="secondary" id="downloadAnyway" type="button">Install to Beat Saber anyway</button>
@@ -380,6 +410,9 @@
 
   <script>
     const $ = id => document.getElementById(id);
+    const staticDemo = Boolean(window.BEATFORGE_STATIC);
+    let demoAssets = null;
+    let jobStream = null, fallbackTimer = null;
     const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     let audioFile = null;
     let jobId = null;
@@ -623,7 +656,9 @@
     $('advancedSettings').addEventListener('change', applyAdvanced);
     applyAdvanced();
 
-    api('/api/beat-saber/status').then(data => {
+    if (staticDemo) {
+      $('gameStatus').textContent = 'Demo Studio · local generation available on your PC';
+    } else api('/api/beat-saber/status').then(data => {
       $('gameStatus').textContent = data.found ? 'Beat Saber library connected' : 'Beat Saber library not found';
       $('gameStatus').classList.toggle('ok', data.found);
     }).catch(() => { $('gameStatus').textContent = 'Beat Saber check unavailable'; });
@@ -639,7 +674,7 @@
       return [...document.querySelectorAll('.diff-toggle[aria-pressed="true"]')].map(button => button.dataset.difficulty);
     }
     function currentMappingPlan() {
-      return { title: $('title').value.trim(), artist: $('artist').value.trim(), mapper: $('mapper').value.trim() || 'BeatForge', seed: Number($('seed').value || 42), difficulties: selectedDifficulties(), creativeBrief: $('creativeBrief').value.trim(), metadataId };
+      return { title: $('title').value.trim(), artist: $('artist').value.trim(), mapper: $('mapper').value.trim() || 'BeatForge', seed: Number($('seed').value || 42), difficulties: selectedDifficulties(), creativeBrief: $('creativeBrief').value.trim(), mappingPlan: window.BeatForgeControls?.getPlan() || {brief: $('creativeBrief').value.trim()}, metadataId };
     }
     function applyMappingPlan(plan = {}) {
       const allowed = new Set(['Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus']);
@@ -653,6 +688,7 @@
         if (!chosen.length) throw new Error('Choose at least one supported difficulty');
         document.querySelectorAll('.diff-toggle').forEach(button => button.setAttribute('aria-pressed', String(chosen.includes(button.dataset.difficulty))));
       }
+      if (plan.mappingPlan) window.BeatForgeControls?.applyPlan(plan.mappingPlan);
       const state = getStudioState({ includeActivity: true });
       setState('Mapping plan updated', 'Review the visible plan, then ask the agent to generate when ready.', 'good', { algorithm: 'webmcp · plan' });
       return state;
@@ -678,14 +714,17 @@
       return state;
     }
     function demoSummary(difficulties) {
-      const counts = { Easy: [48, 6, 0, 0, 0], Normal: [72, 10, 2, 0, 0], Hard: [118, 20, 4, 2, 0], Expert: [176, 34, 8, 3, 2], ExpertPlus: [238, 52, 14, 6, 4] };
-      return Object.fromEntries(difficulties.map(name => { const [notes, arcs, chains, bombs, walls] = counts[name]; return [name, { notes, arcs, chains, bombs, walls }]; }));
+      const available = demoAssets?.summary?.difficulties || {};
+      return Object.fromEntries(difficulties.filter(name => available[name]).map(name => [name, available[name]]));
     }
     function buildDemoJob() {
       const plan = currentMappingPlan();
-      return { id: jobId || `demo-${Date.now().toString(36)}`, demo: true, status: 'playtest_candidate', localStatus: 'playtest_candidate', title: plan.title || 'Neon Rain', artist: plan.artist || 'BeatForge Demo', mapper: plan.mapper, seed: plan.seed, difficulties: plan.difficulties, stage: 'ready', detail: 'Rights-safe browser preview generated from the shared mapping plan.', elapsed: 0.3, timingVerified: true, summary: { difficulties: demoSummary(plan.difficulties) }, qa: { status: 'pass', errors: 0, warnings: 0 }, releaseGate: { localHardGates: true, providerReview: false, noExternalFindings: false, aiReleaseRoute: false, allFiveFullSpeed: false, expertSlow: false, separateFreshSightRead: false, evidenceCount: demoEvidence.length }, stages: [{ stage: 'brief', detail: plan.creativeBrief || 'No creative brief supplied.' }, { stage: 'plan', detail: `${plan.difficulties.length} difficulty maps selected with deterministic seed ${plan.seed}.` }, { stage: 'ready', detail: 'Preview is ready for human review; no headset clearance is implied.' }] };
+      return { id: jobId || `demo-${Date.now().toString(36)}`, demo: true, status: 'playtest_candidate', localStatus: 'playtest_candidate', title: demoAssets?.title || 'Neon Rain', artist: 'BeatForge Demo', mapper: 'BeatForge', seed: demoAssets?.provenance?.seed || 42, difficulties: plan.difficulties, stage: 'ready', detail: 'Real sample chart and audio loaded. Creative settings apply to new local runs; this sample is fixed.', timingVerified: Boolean(demoAssets?.timingVerified), summary: {difficulties: demoSummary(plan.difficulties)}, qa: {status: demoAssets?.qa?.status, errors: demoAssets?.qa?.errors?.length || 0, warnings: demoAssets?.qa?.warnings?.length || 0}, releaseGate: {localHardGates: demoAssets?.qa?.errors?.length === 0, evidenceCount: demoEvidence.length}, stages: [{stage:'sample',detail:'Synthetic authored score, mapped with the real choreography engine and structurally validated. Human headset evidence is still required.'}] };
     }
-    function loadDemoSession() {
+    async function loadDemoSession() {
+      if (jobStream) jobStream.close();
+      clearTimeout(fallbackTimer);
+      demoAssets = await window.BeatForgePreview.loadDemo();
       demoMode = true;
       demoEvidence = [];
       audioFile = { name: 'neon-rain-demo.wav', size: 3145728, type: 'audio/wav', demo: true };
@@ -697,6 +736,7 @@
       $('mapper').value = 'BeatForge + human/agent session';
       $('seed').value = '42';
       $('creativeBrief').value = 'Neon, syncopated, high-energy chorus; keep Expert readable for a first-time player.';
+      window.BeatForgeControls?.applyPlan(demoAssets.mappingPlan?.controls || {brief: 'flow, lighter verses, denser chorus'});
       document.querySelectorAll('.diff-toggle').forEach(button => button.setAttribute('aria-pressed', 'true'));
       $('filename').textContent = 'neon-rain-demo.wav · synthetic 30-second groove';
       jobId = null;
@@ -704,7 +744,7 @@
       $('outputActions').hidden = true;
       $('playtestPanel').hidden = true;
       setState('Demo track ready', 'The synthetic groove is loaded. Ask an agent to refine the brief or generate a preview.', 'good', { algorithm: 'webmcp · rights-safe demo' });
-      recordAgentActivity({ kind: 'human', label: 'Human loaded collaboration demo', detail: 'Synthetic 30-second groove; no copyrighted audio or pack is created.' });
+      recordAgentActivity({ kind: 'human', label: 'Human loaded collaboration demo', detail: 'Synthetic 30-second groove with real audio, chart data and a downloadable sample pack.' });
       return getStudioState({ includeActivity: true });
     }
     async function startGeneration({ source = 'human', reason = '' } = {}) {
@@ -719,6 +759,7 @@
         $('generate').disabled = false;
         return { ok: true, mode: 'rights-safe-demo', id: job.id, status: job.status, summary: job.summary, humanNextAction: 'Play or discuss the preview, then record only real human evidence.' };
       }
+      if (staticDemo && !window.BeatForgeConnection?.connected) return setState('Open your local Studio to generate', 'This hosted page previews the sample. Run Start-BeatForge.ps1 on your PC to map your own audio.', 'bad'), {ok:false,error:'Generation requires the local BeatForge Studio'};
       if (!audioFile) return setState('Select a mastered audio file first.', 'The mapper cannot run without local audio.', 'bad'), { ok: false, error: 'Select a mastered audio file first.' };
       const chosen = selectedDifficulties();
       if (!chosen.length) {
@@ -734,6 +775,9 @@
       form.append('seed', $('seed').value || '42');
       form.append('difficulties', chosen.join(','));
       if (metadataId) form.append('metadataId', metadataId);
+      form.append('mappingPlan', JSON.stringify(window.BeatForgeControls.getPlan()));
+      form.append('engine', $('engine').value);
+      if ($('engine').value === 'rl') form.append('rlModel', $('rlModel').value.trim());
       $('generate').disabled = true;
       const trackName = [$('title').value, $('artist').value].filter(Boolean).join(' · ') || audioFile.name;
       $('statusTrack').textContent = trackName;
@@ -742,6 +786,10 @@
       $('decodeMeter').classList.remove('show');
       setState('Uploading local audio', reason || 'Starting the official-premium pipeline.', 'live', { algorithm: source === 'agent' ? 'webmcp · upload' : 'pipeline · upload' });
       try {
+        if (window.BeatForgeConnection?.connected) {
+          const result = await window.BeatForgeConnection.generate(form);
+          return {ok:true,id:result.id,status:result.state,mode:'remote-gateway',humanNextAction:'Review worker status in My runs, then inspect the published preview.'};
+        }
         const result = await api('/api/generate', { method: 'POST', body: form });
         jobId = result.id;
         $('jobLabel').textContent = `Job ${jobId}`;
@@ -764,19 +812,58 @@
       });
     });
     $('generate').addEventListener('click', () => startGeneration({ source: 'human' }));
-    $('loadDemo').addEventListener('click', loadDemoSession);
+    $('loadDemo').addEventListener('click', () => loadDemoSession().catch(error => setState('Sample unavailable', error.message, 'bad')));
 
+    function showRemoteJob(job) {
+      if (!window.BeatForgeConnection?.connected) return;
+      if (jobStream) jobStream.close(); clearTimeout(fallbackTimer); stopElapsedClock();
+      jobId=job.id;demoMode=false;installedPath=null;
+      lastJob={...job.request,id:job.id,status:job.result?.status||job.state,remote:true,detail:job.result?.message};
+      $('jobLabel').textContent=`Gateway job ${job.id}`;$('statusElapsed').textContent='';
+      $('statusTrack').textContent=[job.request.title,job.request.artist].filter(Boolean).join(' · ');
+      $('outputActions').hidden=true;$('playtestPanel').hidden=true;
+      const live=['queued','running'].includes(job.state);
+      $('generate').disabled=live;
+      setState(statusLabel(lastJob.status),job.result?.message||'The gateway has saved this run. Your local worker processes it when online.',live?'live':job.state==='failed'?'bad':'good',{algorithm:'gateway · premium'});
+    }
+    window.addEventListener('beatforge:connection',()=>{
+      if(jobStream)jobStream.close();clearTimeout(fallbackTimer);stopElapsedClock();
+      lastJob=null;jobId=null;demoMode=false;installedPath=null;
+      $('gameStatus').textContent=window.BeatForgeConnection?.connected?`Gateway Studio · ${window.BeatForgeConnection.origin}`:staticDemo?'Demo Studio · local generation available on your PC':'Local Studio';
+      $('outputActions').hidden=true;$('playtestPanel').hidden=true;$('generate').disabled=false;
+      $('jobLabel').textContent='NO JOB';
+      setState(window.BeatForgeConnection?.connected?'Gateway workspace connected':'Local workspace ready','Choose a track or open a saved run.','good');
+    });
+    function followJob(id) {
+      jobId = id; demoMode = false; installedPath = null;
+      $('outputActions').hidden = true;
+      try { localStorage.setItem('beatforge.lastJob', id); } catch {}
+      api(`/api/jobs/${id}`).then(job => { if (jobId === id) renderJob(job); }).catch(error => setState('Run unavailable', error.message, 'bad'));
+      streamJob();
+    }
     function streamJob() {
-      const stream = new EventSource(`/api/jobs/${jobId}/events`);
-      stream.addEventListener('progress', event => renderJob(JSON.parse(event.data)));
-      stream.addEventListener('end', () => stream.close());
-      stream.onerror = async () => { stream.close(); try { renderJob(await api(`/api/jobs/${jobId}`)); } catch {} };
+      if (jobStream) jobStream.close();
+      clearTimeout(fallbackTimer);
+      const id = jobId;
+      const active = job => ['queued','running','validating','cancelling'].includes(job.status);
+      const poll = async () => {
+        if (jobId !== id) return;
+        try { const job = await api(`/api/jobs/${id}`); if (jobId !== id) return; renderJob(job); if (active(job)) fallbackTimer = setTimeout(poll, 2000); }
+        catch { fallbackTimer = setTimeout(poll, 4000); }
+      };
+      const stream = new EventSource(`/api/jobs/${id}/events`); jobStream = stream;
+      stream.addEventListener('progress', event => { if (jobId === id) renderJob(JSON.parse(event.data)); });
+      stream.addEventListener('end', () => { stream.close(); window.dispatchEvent(new Event('beatforge:history')); });
+      stream.onerror = () => { stream.close(); poll(); };
     }
 
     function renderJob(job) {
       lastJob = job;
-      const live = ['queued','running','validating'].includes(job.status);
-      const failed = ['error','invalid','corpus_incomplete'].includes(job.status);
+      jobId = job.id;
+      $('jobLabel').textContent = `Job ${job.id}`;
+      window.dispatchEvent(new CustomEvent('beatforge:job', {detail:job}));
+      const live = ['queued','running','validating','cancelling'].includes(job.status);
+      const failed = ['error','invalid','corpus_incomplete','interrupted','cancelled'].includes(job.status);
       const track = [job.title, job.artist].filter(Boolean).join(' · ') || 'Unknown track';
       $('statusTrack').textContent = track;
       const stage = job.stage || job.status;
@@ -817,7 +904,7 @@
     }
 
     function statusLabel(status) {
-      return ({queued:'Queued',running:'Analyzing and generating',validating:'Running hard gates',needs_anchors:'Timing anchors required',needs_palette:'Artwork or palette approval required',corpus_incomplete:'Official corpus is incomplete',invalid:'Local hard gate failed',error:'Pipeline error',review_required:'Ready for Codex review',playtest_candidate:'Locally validated playtest candidate',studio_reviewed:'Codex review passed',release_candidate:'Release candidate'})[status] || status;
+      return ({interrupted:'Run interrupted. Retry from My runs.',cancelled:'Run cancelled',cancelling:'Cancelling run',queued:'Queued',running:'Analyzing and generating',validating:'Running hard gates',needs_anchors:'Timing anchors required',needs_palette:'Artwork or palette approval required',corpus_incomplete:'Official corpus is incomplete',invalid:'Local hard gate failed',error:'Pipeline error',review_required:'Ready for Codex review',playtest_candidate:'Locally validated playtest candidate',studio_reviewed:'Codex review passed',release_candidate:'Release candidate'})[status] || status;
     }
     function gateDetail(status) {
       return ({needs_anchors:'The timing models did not meet the premium residual threshold.',needs_palette:'BeatForge will not invent map colors without a readable approved pair.',review_required:'Local validation passed. Prepare one exact Codex review bundle.',studio_reviewed:'Codex review passed. Headset evidence remains.',release_candidate:'All software, Codex, and recorded human gates passed.'})[status] || '';
@@ -887,9 +974,9 @@
       $('playtestPanel').hidden = false;
       const demo = Boolean(job.demo);
       if (demo) {
-        $('download').removeAttribute('href');
-        $('download').textContent = 'Browser preview · no ZIP';
-        $('download').setAttribute('aria-disabled', 'true');
+        $('download').href = (staticDemo ? 'assets/demo/' : '/assets/demo/') + 'map.zip';
+        $('download').textContent = 'Download sample ZIP';
+        $('download').removeAttribute('aria-disabled');
       } else {
         $('download').href = `/api/jobs/${jobId}/download`;
         $('download').textContent = 'Save ZIP copy';
@@ -951,13 +1038,14 @@
       if (!lastJob) return getStudioState({ includeActivity: options.detail === 'full' });
       let qa = lastJob.qa || null;
       if (!demoMode && jobId) {
-        try { qa = await api(`/api/jobs/${jobId}/critic`); } catch (error) { qa = { status: 'unavailable', detail: error.message }; }
+        try { qa = lastJob.remote ? await window.BeatForgeConnection.request(`/api/jobs/${jobId}/qa`) : await api(`/api/jobs/${jobId}/critic`); } catch (error) { qa = { status: 'unavailable', detail: error.message }; }
       }
       const state = getStudioState({ includeActivity: options.detail === 'full' });
       return { ...state, review: { qa, safety: 'Human headset evidence is still required; this review does not certify playability.' } };
     }
     async function recordPlaytest(input = {}) {
       if (!lastJob || !jobId) throw new Error('Generate a map before recording playtest evidence');
+      if(lastJob.remote)throw new Error('Gateway headset clearance is not supported. Use explicit mapping feedback without claiming a release.');
       const difficulty = String(input.difficulty || '');
       const speed = String(input.speed || '');
       const tester = String(input.tester || '').trim();
@@ -1009,8 +1097,11 @@
       } catch (error) { setState('Provider setup failed', error.message, 'bad'); }
     });
     function showReport(title, report) { $('reportTitle').textContent = title; $('reportBody').textContent = JSON.stringify(report, null, 2); $('reportDialog').showModal(); }
-    window.BeatForgeApp = { getStudioState, applyMappingPlan, findSongMetadata, importSongPreview, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
+    window.BeatForgeApp = { staticDemo, followJob, showRemoteJob, creativePlan: () => window.BeatForgeControls.getPlan(), getStudioState, applyMappingPlan, findSongMetadata, importSongPreview, loadDemoSession, startGeneration, reviewCurrentMap, recordPlaytest, recordAgentActivity, setWebMcpStatus };
   </script>
+  <script src="/web/studio.js"></script>
+  <script src="/web/preview.js"></script>
+  <script src="/web/connector.js"></script>
   <script src="/web/webmcp.js"></script>
 </body>
 </html>

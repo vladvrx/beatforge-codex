@@ -15,6 +15,19 @@ from beatforge.api import app
 from test_pipeline import write_click_track
 
 
+@pytest.fixture(autouse=True)
+def isolate_studio_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Endpoint tests must never touch the user's real jobs or game library."""
+    from beatforge import api
+
+    levels = tmp_path / "test-custom-levels"
+    levels.mkdir()
+    monkeypatch.setenv("BEATSABER_CUSTOM_LEVELS", str(levels))
+    monkeypatch.setattr(api, "JOBS_DIR", tmp_path / "test-jobs")
+    monkeypatch.setattr(api, "IMPORTS_DIR", tmp_path / "test-imports")
+    monkeypatch.setattr(api, "run_premium_pipeline", lambda **kwargs: {"status": "needs_anchors", "payload": {"message": "test fixture"}})
+
+
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     return TestClient(app)
@@ -376,7 +389,7 @@ def test_generate_and_install_cycle(
     assert len(dl.content) > 1000
 
 
-def test_studio_states_are_the_ten_consumed_release_states() -> None:
+def test_studio_states_include_recoverable_terminal_states() -> None:
     from beatforge.api import STUDIO_STATES, TERMINAL_STATES
 
     assert STUDIO_STATES == (
@@ -390,9 +403,11 @@ def test_studio_states_are_the_ten_consumed_release_states() -> None:
         "release_candidate",
         "invalid",
         "error",
+        "interrupted",
+        "cancelled",
     )
     assert "validating" not in TERMINAL_STATES
-    assert len(STUDIO_STATES) == 10
+    assert len(STUDIO_STATES) == 12
 
 
 def test_click_track_serves_analysis_wav_only(
@@ -453,6 +468,9 @@ def test_unconfirmed_pack_auto_installs_into_custom_levels(
     map_dir.mkdir(parents=True)
     (job_dir / "input.wav").write_bytes(b"RIFF")
     (map_dir / "Info.dat").write_text('{"_songName":"Draft"}', encoding="utf-8")
+    reports = map_dir / "_beatforge"
+    reports.mkdir()
+    (reports / "qa_report.json").write_text('{"status":"playtest_candidate","errors":[],"warnings":[]}', encoding="utf-8")
     api._write_status(
         job_id,
         {
@@ -468,7 +486,7 @@ def test_unconfirmed_pack_auto_installs_into_custom_levels(
     )
 
     def fake_pipeline(**kwargs: object) -> dict:
-        return {"status": "invalid", "payload": {"message": "unconfirmed"}}
+        return {"status": "playtest_candidate", "payload": {"message": "unconfirmed"}}
 
     monkeypatch.setattr(api, "run_premium_pipeline", fake_pipeline)
     monkeypatch.setattr(api, "summarize_map", lambda _path: {"difficulties": {}})
@@ -493,6 +511,9 @@ def test_unconfirmed_pack_can_be_downloaded(
     job_dir = tmp_path / job_id
     job_dir.mkdir()
     (job_dir / "map.zip").write_bytes(b"PK" + b"\x00" * 1200)
+    reports = job_dir / "map" / "_beatforge"
+    reports.mkdir(parents=True)
+    (reports / "qa_report.json").write_text('{"status":"playtest_candidate","errors":[],"warnings":[]}', encoding="utf-8")
     api._write_status(
         job_id,
         {"id": job_id, "status": "invalid", "localStatus": "unconfirmed_pack", "title": "Draft"},
@@ -749,7 +770,7 @@ def test_premium_exit_codes_map_to_studio_refusal_states(monkeypatch: pytest.Mon
             self.stdout = io.StringIO(json.dumps({"status": "x", "message": "pipeline"}))
             self.stderr = io.StringIO("BEATFORGE_PROGRESS\tanalysis\tdecoding audio\n")
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             return self.returncode
 
     def run_with(code: int) -> str:
@@ -789,7 +810,7 @@ def test_premium_forwards_progress_lines_from_stderr(monkeypatch: pytest.MonkeyP
                 "BEATFORGE_PROGRESS\tchoreography\tsolving joint CP-SAT for ExpertPlus\n"
             )
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             return self.returncode
 
     seen: list[tuple[str, str]] = []

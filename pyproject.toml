@@ -26,6 +26,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==8.4.2", "playwright==1.55.0"]
+studio = ["ortools==9.15.6755", "UnityPy==1.25.3"]
+rl = ["torch>=2.6,<3"]
+connector = ["mcp==1.30.0", "PyJWT[crypto]>=2.12,<3"]
 
 [project.scripts]
 beatforge = "beatforge.cli:main"

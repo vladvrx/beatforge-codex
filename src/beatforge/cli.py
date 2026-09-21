@@ -93,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--anchors", type=Path, default=None)
     p.add_argument("--palette", type=Path, default=None)
+    p.add_argument("--mapping-plan", type=Path, help="JSON creative controls shared with Studio")
+    p.add_argument("--engine", choices=("premium", "rl"), default="premium")
+    p.add_argument("--rl-model", type=Path, help="Trained checkpoint required by the RL engine")
     p.add_argument(
         "--no-critic",
         action="store_true",
@@ -112,6 +115,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.legacy:
         return _legacy_main(args)
 
+    mapping_plan = None
+    if args.mapping_plan:
+        from .mapping_plan import normalize_mapping_plan
+        try:
+            mapping_plan = normalize_mapping_plan(json.loads(args.mapping_plan.read_text(encoding="utf-8-sig")))
+        except (OSError, ValueError, TypeError) as error:
+            p.error(f"Invalid mapping plan: {error}")
+    if args.engine == "rl" and not args.rl_model:
+        p.error("--engine rl requires --rl-model with a trained checkpoint")
+
     title = args.title or audio.stem
     out_dir = args.out.expanduser().resolve()
     map_folder = out_dir / "".join(c if c.isalnum() or c in "-_" else "_" for c in title)[:80]
@@ -126,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         anchors=args.anchors.expanduser().resolve() if args.anchors else None,
         palette=args.palette.expanduser().resolve() if args.palette else None,
+        mapping_plan=mapping_plan,
+        engine=args.engine,
+        rl_model=args.rl_model.expanduser().resolve() if args.rl_model else None,
         progress=lambda stage, detail: print(f"  [{stage}] {detail}"),
     )
     print(f"Studio status: {result['status']} (exit {result['returnCode']})")

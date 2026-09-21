@@ -1,6 +1,31 @@
 services:
   - type: web
-    name: beatforge-webmcp
+    name: beatforge-connector
     runtime: python
-    buildCommand: pip install .
-    startCommand: uvicorn beatforge.api:app --host 0.0.0.0 --port $PORT
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements-gateway.txt
+    startCommand: PYTHONPATH=src uvicorn beatforge.connector:from_env --factory --host 0.0.0.0 --port $PORT --workers 1 --no-access-log
+    healthCheckPath: /health
+    disk:
+      name: beatforge-data
+      mountPath: /var/data/beatforge
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: BEATFORGE_CONNECTOR_DB
+        value: /var/data/beatforge/jobs.sqlite3
+      - key: BEATFORGE_CONNECTOR_HOSTS
+        sync: false
+      - key: BEATFORGE_CONNECTOR_ORIGINS
+        sync: false
+      - key: BEATFORGE_CONNECTOR_TOKENS
+        sync: false
+      - key: BEATFORGE_OAUTH_ISSUER
+        sync: false
+      - key: BEATFORGE_OAUTH_JWKS_URL
+        sync: false
+      - key: BEATFORGE_OAUTH_RESOURCE
+        sync: false

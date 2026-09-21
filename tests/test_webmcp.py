@@ -1,6 +1,8 @@
 """WebMCP challenge contracts for the browser collaboration surface."""
 
 from pathlib import Path
+import json
+import re
 
 from fastapi.testclient import TestClient
 
@@ -23,8 +25,11 @@ def test_webmcp_uses_standard_document_registration_and_named_tools() -> None:
         "generate_beatmap",
         "review_current_beatmap",
         "record_human_playtest",
+        "get_chart_preview",
+        "get_learning_summary",
+        "record_mapping_feedback",
     ):
-        assert f'name: "{name}"' in WEBMCP
+        assert re.search(r'name\s*:\s*"' + re.escape(name) + r'"', WEBMCP)
     assert "inputSchema" in WEBMCP
     assert "window.BeatForgeWebMcp" in WEBMCP
 
@@ -49,10 +54,14 @@ def test_webmcp_script_is_served_by_the_studio() -> None:
     assert "document.modelContext.registerTool" in response.text
 
 
-def test_demo_is_explicitly_rights_safe_and_not_a_real_download() -> None:
+def test_demo_download_contains_real_rights_safe_chart_assets() -> None:
     assert "Synthetic 30-second groove" in WEB
-    assert "Browser preview · no ZIP" in WEB
+    assert "Download sample ZIP" in WEB
     assert "Human headset evidence is still required" in WEB
+    demo = json.loads((ROOT / "web" / "assets" / "demo" / "preview.json").read_text())
+    assert demo["source"] == "synthetic-authored-score"
+    assert len(demo["charts"]) == 5
+    assert (ROOT / "web" / "assets" / "demo" / "map.zip").is_file()
 
 
 def test_metadata_lookup_is_explicitly_preview_only() -> None:

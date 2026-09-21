@@ -31,3 +31,9 @@ BeatSaberVersion.txt
 .DS_Store
 Thumbs.db
 site/
+!web/assets/demo/song.ogg
+data/learning.json
+data/model_registry/
+data/worker/
+data/connector/
+data/connector-smoke/

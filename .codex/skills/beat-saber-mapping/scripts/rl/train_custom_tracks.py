@@ -1,162 +1,122 @@
 #!/usr/bin/env python3
-"""Train RL Policy on User Tracks: Daft Punk R.A.M and Ninajirachi."""
+"""Train on verified local analyzer artifacts using the inference feature contract."""
 
 from __future__ import annotations
 
 import argparse
-import io
-import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-import numpy as np
 import torch
 
-try:
-    from .environment import BeatSaberEnv
-    from .models import ActorCriticPolicy
-    from .train_ppo import train_ppo
-except ImportError:
-    from rl.environment import BeatSaberEnv
-    from rl.models import ActorCriticPolicy
-    from rl.train_ppo import train_ppo
-
-from beatforge_core import AudioBuffer, frame_features, load_audio
+from rl.checkpoints import load_checkpoint
+from rl.environment import BeatSaberEnv
+from rl.features import file_sha256, load_analysis_features
+from rl.library import load_library
+from rl.models import ActorCriticPolicy
+from rl.train_ppo import train_ppo
 
 
-def extract_track_features(audio_path: Path) -> Tuple[Dict[str, Any], List[float], float]:
-    """Extract audio features, beat grid, and BPM for RL environment training."""
-    print(f"Extracting features from {audio_path.name}...", flush=True)
-    audio = load_audio(audio_path)
-    features = frame_features(audio.samples)
-    hop = int(features["hop"][0])
-    sr = audio.sample_rate
+def extract_track_features(audio_path: Path, analysis_dir: Path | None = None) -> tuple[dict[str, Any], list[float], float]:
+    """Load existing analysis; raw audio must match its recorded source hash.
 
-    flux = features["flux"]
-    bpm_est = 120.0  # default fallback
-
-    # Compute rough tempo / beat grid
-    length = len(flux)
-    grid_len = max(32, int(audio.duration_samples / (sr * 0.5)))
-    beat_grid = [round(i * 0.25, 4) for i in range(grid_len)]
-
-    # Interpolate flux into onsets
-    onsets = np.interp(np.linspace(0, len(flux), grid_len), np.arange(len(flux)), flux)
-    onsets = (onsets - np.min(onsets)) / (np.max(onsets) - np.min(onsets) + 1e-6)
-
-    # Simulated stem profiles based on transient frequency bands
-    audio_features = {
-        "onsets": onsets.tolist(),
-        "flux": onsets.tolist(),
-        "stems": {
-            "drums": (onsets * 0.8 + np.random.uniform(0.0, 0.2, grid_len)).tolist(),
-            "bass": (onsets * 0.6 + np.random.uniform(0.0, 0.4, grid_len)).tolist(),
-            "vocals": (onsets * 0.5 + np.random.uniform(0.0, 0.3, grid_len)).tolist(),
-            "guitar": (onsets * 0.4 + np.random.uniform(0.0, 0.2, grid_len)).tolist(),
-            "piano": (onsets * 0.3 + np.random.uniform(0.0, 0.2, grid_len)).tolist(),
-            "other": (onsets * 0.3 + np.random.uniform(0.0, 0.2, grid_len)).tolist(),
-        },
-        "sections": ["verse"] * grid_len,
-    }
-
-    return audio_features, beat_grid, bpm_est
+    A directory can be supplied directly. For an audio file, the default artifact
+    directory is its sibling ``<stem>.analysis``. Analysis and human timing review
+    run before training, so no background model downloads or fake clocks occur.
+    """
+    audio_path = Path(audio_path)
+    directory = analysis_dir or (audio_path if audio_path.is_dir() else audio_path.with_suffix(".analysis"))
+    bundle = load_analysis_features(directory)
+    if audio_path.is_file() and file_sha256(audio_path) != bundle.provenance.get("sourceSha256"):
+        raise ValueError(f"Analysis does not belong to audio file {audio_path.name}")
+    if audio_path.is_file():
+        bundle.provenance["sourceAudioVerified"] = True
+    return bundle.audio_features, bundle.beat_grid, bundle.bpm
 
 
 def train_on_custom_library(
-    tracks: List[Path],
+    tracks: list[Path],
     timesteps_per_track: int = 16384,
     epochs: int = 4,
     lr: float = 2e-4,
     model_path: Path = Path("data/models/ppo_policy.pt"),
-) -> None:
+    *,
+    rounds: int = 1,
+    seed: int = 0,
+    resume: bool = True,
+    held_out_hashes: set[str] | None = None,
+) -> dict[str, Any]:
+    if not tracks or rounds <= 0:
+        raise ValueError("Training requires tracks and a positive number of rounds")
+    # Validate the entire library before updating any weights.
+    prepared = [(Path(track), extract_track_features(Path(track))) for track in tracks]
+    training_hashes: set[str] = set()
+    for track, (features, _, _) in prepared:
+        source = features["provenance"].get("sourceSha256")
+        if not isinstance(source, str) or len(source) != 64:
+            raise ValueError(f"Training analysis requires the audio source SHA-256: {track}")
+        training_hashes.add(source)
+    held_out_hashes = held_out_hashes or set()
+    torch.manual_seed(seed)
     policy = ActorCriticPolicy()
-    if model_path.is_file():
-        try:
-            policy.load_state_dict(torch.load(model_path, map_location="cpu"))
-            print(f"Resumed existing weights from {model_path}", flush=True)
-        except Exception as e:
-            print(f"Could not load checkpoint: {e}", flush=True)
+    prior: dict[str, Any] = {}
+    if resume and model_path.is_file():
+        policy, prior = load_checkpoint(model_path)
+        if not prior.get("trainingSourceSha256"):
+            raise ValueError("Checkpoint has no training-library provenance. Use --no-resume for a traceable run.")
+        training_hashes.update(prior["trainingSourceSha256"])
+    if training_hashes & held_out_hashes:
+        raise ValueError("Held-out audio appears in the checkpoint or requested training library")
 
-    print(f"\n=======================================================", flush=True)
-    print(f" Starting Continuous RL Training on {len(tracks)} User Tracks", flush=True)
-    print(f"=======================================================\n", flush=True)
-
-    for round_idx in range(1, 100):
-        print(f"\n--- Training Round {round_idx} Across Library ---", flush=True)
-        for idx, track_path in enumerate(tracks, 1):
-            if not track_path.is_file():
-                continue
-            print(f"\n[{idx}/{len(tracks)}] Processing: {track_path.name}", flush=True)
-            try:
-                audio_feats, beat_grid, bpm = extract_track_features(track_path)
-                env = BeatSaberEnv(
-                    audio_features=audio_feats,
-                    beat_grid=beat_grid,
-                    bpm=bpm,
-                    difficulty="Expert",
-                )
-                train_ppo(
-                    policy=policy,
-                    env=env,
-                    total_timesteps=timesteps_per_track,
-                    rollout_steps=512,
-                    ppo_epochs=epochs,
-                    lr=lr,
-                    save_path=model_path,
-                )
-            except Exception as e:
-                print(f"Error training on {track_path.name}: {e}", flush=True)
+    runs = []
+    for round_index in range(rounds):
+        for index, (track, (features, grid, bpm)) in enumerate(prepared):
+            run_seed = seed + round_index * len(prepared) + index
+            print(f"Round {round_index + 1}/{rounds}, track {index + 1}/{len(prepared)}: {track.name}", flush=True)
+            env = BeatSaberEnv(features, grid, bpm, difficulty="Expert")
+            metrics = train_ppo(
+                policy, env, total_timesteps=timesteps_per_track,
+                rollout_steps=min(512, timesteps_per_track), ppo_epochs=epochs,
+                lr=lr, save_path=model_path, seed=run_seed,
+                checkpoint_metadata={
+                    "trainingSourceSha256": sorted(training_hashes),
+                    "heldOutSourceSha256": sorted(held_out_hashes),
+                    "librarySeed": seed, "round": round_index + 1,
+                    "resumedCheckpointSha256": prior.get("checkpointSha256"),
+                },
+            )
+            runs.append({"sourceSha256": features["provenance"]["sourceSha256"], **metrics})
+    return {"seed": seed, "rounds": rounds, "runs": runs, "checkpoint": str(model_path)}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Train RL policy on specific tracks")
-    parser.add_argument("--ram-dir", type=Path, default=Path(r"C:\Users\user\Downloads\R.A.M"))
-    parser.add_argument("--ninajirachi-dir", type=Path, default=Path(r"data\downloads\ninajirachi"))
-    parser.add_argument("--spotify-dir", type=Path, default=Path(r"data\downloads\spotify_july"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--analysis-dir", action="append", type=Path, help="Repeat for verified analysis directories")
+    source.add_argument("--manifest", type=Path, help="JSON song library with explicit train/validation/test splits")
     parser.add_argument("--timesteps-per-track", type=int, default=16384)
+    parser.add_argument("--rounds", type=int, default=1)
+    parser.add_argument("--epochs", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", type=Path, default=Path("data/models/ppo_policy.pt"))
     args = parser.parse_args()
-
-    tracks: List[Path] = []
-    if args.ram_dir.is_dir():
-        for ext in ("*.mp3", "*.ogg", "*.wav", "*.m4a"):
-            tracks.extend(sorted(args.ram_dir.glob(ext)))
-    
-    downloads_root = Path("data/downloads")
-    if downloads_root.is_dir():
-        for ext in ("**/*.mp3", "**/*.ogg", "**/*.wav", "**/*.webm", "**/*.m4a"):
-            tracks.extend(sorted(downloads_root.glob(ext)))
-
-    # Deduplicate paths
-    unique_tracks = []
-    seen = set()
-    for p in tracks:
-        res = p.resolve()
-        if res not in seen and p.is_file():
-            seen.add(res)
-            unique_tracks.append(p)
-    tracks = unique_tracks
-
-    print(f"Found {len(tracks)} training tracks:")
-    for t in tracks:
-        print(f" - {t.name}")
-
-    if not tracks:
-        print("No audio tracks found!")
-        return 1
-
-    train_on_custom_library(
-        tracks=tracks,
-        timesteps_per_track=args.timesteps_per_track,
-        model_path=args.out,
-    )
+    try:
+        held_out: set[str] = set()
+        tracks = args.analysis_dir or []
+        if args.manifest:
+            library = load_library(args.manifest)
+            tracks = [Path(track["analysisDir"]) for track, _ in library if track["split"] == "train"]
+            held_out = {bundle.provenance["sourceSha256"] for track, bundle in library if track["split"] != "train"}
+        train_on_custom_library(
+            tracks, args.timesteps_per_track, args.epochs, args.lr, args.out,
+            rounds=args.rounds, seed=args.seed, resume=args.resume, held_out_hashes=held_out,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        parser.error(str(exc))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

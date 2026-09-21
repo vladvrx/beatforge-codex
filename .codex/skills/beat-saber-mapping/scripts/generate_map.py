@@ -17,6 +17,8 @@ from typing import Any
 
 from beatforge_core import DIFFICULTIES, TOOL_VERSION, default_cache_dir, difficulty_rank, emit_progress, encode_ogg, find_ffmpeg, load_json, parse_difficulties, sha256_file, write_json
 from choreography import CONFIGS, generate_all
+from mapping_plan import build_section_plan, normalize_mapping_plan
+from timing_export import project_map_timing, project_plan_timing
 from artwork import derive_palette, extract_embedded_artwork, lookup_itunes_cover, lookup_release_cover, palette_from_rgb, write_palette_cover
 from official_corpus import corpus_is_fresh, detect_game_root, sync as sync_official_corpus
 
@@ -373,6 +375,7 @@ def main() -> int:
     parser.add_argument("--profile", default="official-premium", choices=["official-premium", "official-rl"])
     parser.add_argument("--engine", default="cp-sat", choices=["cp-sat", "rl", "hybrid"], help="Choreography engine to use (cp-sat, rl, hybrid)")
     parser.add_argument("--rl-model", type=Path, help="Path to trained PyTorch RL policy checkpoint")
+    parser.add_argument("--mapping-plan", type=Path, help="Version 1 structured creative controls JSON")
     parser.add_argument("--environment", default=None, help="Beat Saber environment name (e.g. DaftPunkEnvironment, DefaultEnvironment)")
     parser.add_argument("--full-spread", action="store_true", default=True)
     parser.add_argument(
@@ -393,6 +396,13 @@ def main() -> int:
     parser.add_argument("--game-root", type=Path, help="Beat Saber install root; auto-detected on common Oculus/Steam paths")
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
+    try:
+        creative_controls = normalize_mapping_plan(load_json(args.mapping_plan)) if args.mapping_plan else None
+        if (args.engine == "rl" or args.profile == "official-rl") and (args.rl_model is None or not args.rl_model.is_file()):
+            raise ValueError("The RL engine requires an existing trained checkpoint supplied with --rl-model")
+    except (ValueError, OSError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     if not args.audio.is_file():
         print(f"ERROR: audio file does not exist: {args.audio}", file=sys.stderr)
         return 2
@@ -423,6 +433,7 @@ def main() -> int:
         emit_progress("timing", "reusing existing analysis.json")
     analysis = load_json(analysis_file)
     sections = load_json(sections_file)
+    creative_plan = build_section_plan(analysis, sections, creative_controls) if creative_controls is not None else None
     unconfirmed = bool(args.continue_unconfirmed)
     if analysis.get("status") != "timing_verified":
         if not unconfirmed:
@@ -496,54 +507,33 @@ def main() -> int:
     emit_progress("choreography", f"solving {', '.join(chosen)}")
     if args.engine == "rl" or args.profile == "official-rl":
         from rl.policy_generator import RLMapGenerator
+        from rl.features import load_analysis_features
 
         rl_gen = RLMapGenerator(model_path=args.rl_model)
-        raw_bg = load_json(analysis_dir / "beat_grid.json") if (analysis_dir / "beat_grid.json").exists() else None
-        if isinstance(raw_bg, dict) and "tempoRegions" in raw_bg:
-            max_beat = max((float(r.get("endBeat", 0.0)) for r in raw_bg.get("tempoRegions", [])), default=0.0)
-            beat_grid = [round(i * 0.25, 4) for i in range(max(16, int(max_beat * 4)))]
-        elif isinstance(raw_bg, list):
-            beat_grid = [float(b) for b in raw_bg]
-        else:
-            duration_s = float(analysis.get("durationSeconds", analysis.get("duration", 240.0)))
-            bpm_val = float(analysis.get("bpm", 125.0))
-            beat_grid = [round(i * 0.25, 4) for i in range(max(16, int(duration_s * bpm_val / 60.0 * 4)))]
-
-        grid_len = len(beat_grid)
-        try:
-            import numpy as np
-            from beatforge_core import frame_features, load_audio
-            audio_buf = load_audio(args.audio)
-            feat = frame_features(audio_buf.samples)
-            flux = feat["flux"]
-            onsets = np.interp(np.linspace(0, len(flux), grid_len), np.arange(len(flux)), flux)
-            onsets = ((onsets - np.min(onsets)) / (np.max(onsets) - np.min(onsets) + 1e-6)).tolist()
-        except Exception:
-            onsets = [0.5] * grid_len
-
-        audio_features = {
-            "onsets": onsets,
-            "flux": onsets,
-            "stems": {
-                "drums": onsets,
-                "bass": onsets,
-                "vocals": [o * 0.7 for o in onsets],
-                "guitar": [o * 0.5 for o in onsets],
-                "piano": [o * 0.5 for o in onsets],
-                "other": [o * 0.4 for o in onsets],
-            },
-            "sections": [s.get("type", "verse") for s in sections] if isinstance(sections, list) else ["verse"] * grid_len,
-        }
+        bundle = load_analysis_features(analysis_dir, require_verified=not unconfirmed)
         maps = {}
         for diff in chosen:
-            maps[diff] = rl_gen.generate_difficulty(audio_features, beat_grid, float(analysis["bpm"]), difficulty=diff)
+            maps[diff] = rl_gen.generate_difficulty(bundle.audio_features, bundle.beat_grid, bundle.bpm, difficulty=diff, seed=seed)
+            if creative_controls and creative_controls["noBombs"]:
+                maps[diff]["bombNotes"] = []
+            if creative_controls and creative_controls["noWalls"]:
+                maps[diff]["obstacles"] = []
         choreography_report = {
             "poseSolver": "rl-policy-v1",
             "solver": "rl-policy-v1",
             "difficulties": chosen,
+            "checkpoint": rl_gen.checkpoint_metadata,
+            "features": bundle.provenance,
+            "mappingPlan": creative_plan,
+            "creativeControlSupport": "RL applies noBombs and noWalls only; phrase, density, and style controls require the premium engine",
         }
     else:
-        maps, choreography_report = generate_all(analysis, sections, seed, args.corpus_database, difficulties=chosen)
+        maps, choreography_report = generate_all(analysis, sections, seed, args.corpus_database, difficulties=chosen, mapping_plan=creative_controls)
+    maps = {difficulty: project_map_timing(payload, analysis) for difficulty, payload in maps.items()}
+    if creative_plan is not None:
+        creative_plan = project_plan_timing(creative_plan, analysis)
+        choreography_report["mappingPlan"] = creative_plan
+        write_json(package_analysis_dir / "mapping_plan.json", creative_plan)
     for difficulty, payload in maps.items():
         write_json(args.out / f"{difficulty}Standard.dat", payload)
     emit_progress("audio", "encoding song.ogg for the Beat Saber pack")
@@ -590,6 +580,7 @@ def main() -> int:
             },
         },
         "choreography": choreography_report,
+        "mappingPlan": creative_plan,
         "officialCorpus": {"database": str(args.corpus_database.resolve()), **corpus_report},
         "documentation": {
             "manifest": "_beatforge/documentation_manifest.json",

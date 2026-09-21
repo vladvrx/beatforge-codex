@@ -12,6 +12,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from rl.checkpoints import load_checkpoint, save_checkpoint
+from rl.features import load_analysis_features
 
 try:
     from .environment import BeatSaberEnv, NUM_HAND_ACTIONS
@@ -70,12 +72,10 @@ class RolloutBuffer:
         """Compute Generalized Advantage Estimation (GAE)."""
         last_gae = 0.0
         for t in reversed(range(self.ptr)):
-            if t == self.ptr - 1:
-                next_val = last_value
-                next_done = 0.0
-            else:
-                next_val = self.values[t + 1]
-                next_done = self.dones[t]
+            next_val = last_value if t == self.ptr - 1 else self.values[t + 1]
+            # dones[t] belongs to the transition at t, including the last slot.
+            # After a terminal step the caller's next observation may be a reset.
+            next_done = self.dones[t]
 
             delta = self.rewards[t] + gamma * next_val * (1.0 - next_done) - self.values[t]
             last_gae = delta + gamma * gae_lambda * (1.0 - next_done) * last_gae
@@ -84,7 +84,8 @@ class RolloutBuffer:
         self.returns[: self.ptr] = self.advantages[: self.ptr] + self.values[: self.ptr]
         # Normalize advantages
         valid_adv = self.advantages[: self.ptr]
-        self.advantages[: self.ptr] = (valid_adv - valid_adv.mean()) / (valid_adv.std() + 1e-8)
+        if self.ptr:
+            self.advantages[: self.ptr] = (valid_adv - valid_adv.mean()) / (valid_adv.std(unbiased=False) + 1e-8)
 
     def reset(self) -> None:
         self.ptr = 0
@@ -105,23 +106,30 @@ def train_ppo(
     vf_coef: float = 0.5,
     device: str = "cpu",
     save_path: Optional[Path] = None,
+    seed: int = 0,
+    checkpoint_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, float]:
+    if min(total_timesteps, rollout_steps, ppo_epochs, batch_size) <= 0 or lr <= 0:
+        raise ValueError("Training steps, epochs, batch size, and learning rate must be positive")
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
     policy.to(device)
     optimizer = optim.Adam(policy.parameters(), lr=lr, eps=1e-5)
     buffer = RolloutBuffer(buffer_size=rollout_steps, obs_dim=env.obs_dim, device=device)
 
-    obs, _ = env.reset()
+    obs, _ = env.reset(seed=seed)
     timesteps_done = 0
     iteration = 0
     history: Dict[str, List[float]] = {"ep_return": [], "policy_loss": [], "value_loss": []}
+    current_ep_reward = 0.0
+    completed_returns: List[float] = []
 
     while timesteps_done < total_timesteps:
         buffer.reset()
         ep_rewards = []
-        current_ep_reward = 0.0
 
         policy.eval()
-        for step in range(rollout_steps):
+        for step in range(min(rollout_steps, total_timesteps - timesteps_done)):
             mask_red, mask_blue = env.action_masks()
             t_obs = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
             t_mask_r = torch.tensor(mask_red, dtype=torch.bool, device=device).unsqueeze(0)
@@ -129,14 +137,27 @@ def train_ppo(
 
             with torch.no_grad():
                 (act_red, act_blue), log_prob, _, val = policy.get_action_and_value(
-                    t_obs, mask_red=t_mask_r, mask_blue=t_mask_b
+                    t_obs, mask_red=t_mask_r, mask_blue=t_mask_b,
+                    blue_mask_fn=lambda selected: torch.as_tensor(
+                        env.blue_action_mask(int(selected.item()), mask_blue), dtype=torch.bool, device=device
+                    ).unsqueeze(0),
                 )
 
             a_r = int(act_red.item())
             a_b = int(act_blue.item())
+            # Replay must use the same conditional distribution as collection.
+            mask_blue = env.blue_action_mask(a_r, mask_blue)
 
             next_obs, reward, terminated, truncated, info = env.step((a_r, a_b))
             current_ep_reward += reward
+
+            # A time limit is not an MDP terminal. Bootstrap its final observation,
+            # then cut the advantage trace before the reset episode.
+            if truncated and not terminated:
+                with torch.no_grad():
+                    final_obs = torch.as_tensor(next_obs, dtype=torch.float32, device=device).unsqueeze(0)
+                    final_value = policy.forward(final_obs)[2].item()
+                reward += gamma * float(final_value)
 
             buffer.add(
                 obs=obs,
@@ -155,12 +176,13 @@ def train_ppo(
 
             if terminated or truncated:
                 ep_rewards.append(current_ep_reward)
+                completed_returns.append(current_ep_reward)
                 current_ep_reward = 0.0
                 obs, _ = env.reset()
 
         with torch.no_grad():
             t_obs = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-            _, _, _, last_val = policy.get_action_and_value(t_obs)
+            _, _, last_val = policy.forward(t_obs)
             last_value = float(last_val.item())
 
         buffer.compute_gae(last_value=last_value, gamma=gamma, gae_lambda=gae_lambda)
@@ -173,7 +195,7 @@ def train_ppo(
 
         indices = np.arange(buffer.ptr)
         for epoch in range(ppo_epochs):
-            np.random.shuffle(indices)
+            rng.shuffle(indices)
             for start in range(0, len(indices), batch_size):
                 end = start + batch_size
                 mb_idx = indices[start:end]
@@ -229,11 +251,21 @@ def train_ppo(
 
     if save_path is not None:
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(policy.state_dict(), save_path)
+        metadata = dict(checkpoint_metadata or {})
+        source = env.audio_features.get("provenance", {}).get("sourceSha256")
+        if source:
+            metadata["trainingSourceSha256"] = sorted(set(metadata.get("trainingSourceSha256", [])) | {source})
+        save_checkpoint(policy, save_path, {
+            **metadata, "algorithm": "ppo", "seed": seed,
+            "lastRunTimesteps": timesteps_done,
+            "features": env.audio_features.get("provenance", {}),
+        })
         print(f"Saved trained PPO policy to {save_path}", flush=True)
 
     return {
-        "final_mean_reward": float(np.mean(ep_rewards) if ep_rewards else current_ep_reward),
+        "final_mean_reward": float(np.mean(completed_returns) if completed_returns else current_ep_reward),
+        "timesteps": timesteps_done,
+        "completed_episodes": len(completed_returns),
         "policy_loss": avg_p_loss,
         "value_loss": avg_v_loss,
     }
@@ -244,18 +276,28 @@ def main() -> int:
     parser.add_argument("--timesteps", type=int, default=1024)
     parser.add_argument("--rollout-steps", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=4)
-    parser.add_argument("--resume", action="store_true", default=True, help="Resume from existing checkpoint if available")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--seed", type=int, default=0)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--analysis-dir", type=Path, help="Verified analyzer artifact directory")
+    source.add_argument("--synthetic", action="store_true", help="Explicit smoke-test pulse, not real-song training")
     parser.add_argument("--out", type=Path, default=Path("data/models/ppo_policy.pt"))
     args = parser.parse_args()
 
-    env = BeatSaberEnv(difficulty="Expert")
+    torch.manual_seed(args.seed)
+    if args.analysis_dir:
+        bundle = load_analysis_features(args.analysis_dir)
+        env = BeatSaberEnv(bundle.audio_features, bundle.beat_grid, bundle.bpm, difficulty="Expert")
+    else:
+        env = BeatSaberEnv(difficulty="Expert")
     policy = ActorCriticPolicy()
+    prior_metadata = {}
     if args.resume and args.out.is_file():
-        try:
-            policy.load_state_dict(torch.load(args.out, map_location="cpu"))
-            print(f"Resumed policy weights from {args.out}", flush=True)
-        except Exception as e:
-            print(f"Could not load checkpoint: {e}, starting from scratch", flush=True)
+        policy, prior_metadata = load_checkpoint(args.out)
+        if args.analysis_dir and not prior_metadata.get("trainingSourceSha256"):
+            parser.error("Checkpoint training lineage is unknown. Use --no-resume to start a traceable run.")
+        print(f"Resumed policy weights from {args.out}", flush=True)
 
     train_ppo(
         policy=policy,
@@ -265,6 +307,8 @@ def main() -> int:
         ppo_epochs=args.epochs,
         lr=args.lr,
         save_path=args.out,
+        seed=args.seed,
+        checkpoint_metadata=prior_metadata,
     )
     return 0
 

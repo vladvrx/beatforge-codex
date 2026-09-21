@@ -4,9 +4,17 @@ BeatForge is a local Windows studio console for generating and reviewing five-di
 
 The WebMCP Challenge edition was built as a solo project with OpenAI Codex as the only AI coding assistant. In my own testing, MCP access makes generation iteration nearly 10 times faster than my previous manual workflow. I estimate the combined analysis, constraints, and review process produces roughly 100 times better consistency and playable quality. These are project observations, not a controlled industry benchmark.
 
-Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. The full FastAPI studio can still be run locally or deployed with `render.yaml`.
+Live rights-safe demo: <https://vladvrx.github.io/beatforge-codex/>. Run the full FastAPI Studio locally. `render.yaml` now hosts only the isolated authenticated connector gateway; it must not expose the local game-control API.
 
 Every run is sample-based, deterministic, and refusal-gated. Uncertain timing returns `needs_anchors`. Missing or unreadable artwork returns `needs_palette`. Same-hand flow conflicts, inward-facing handclaps, saber collisions, arc or chain ownership errors, bomb paths, walls, vision blocks, schema errors, and timing failures block the output.
+
+## Remote connector
+
+BeatForge includes shared REST and Streamable HTTP MCP operations for generation, QA, previews, section revisions, presets, comparisons and explicit feedback. Durable jobs are processed by an outbound local worker; private corpus assets stay on the PC. Studio can connect to review remote runs and use the editorial controls.
+
+Start with [hosting and budget setup](docs/HOSTING.md), [authentication](docs/CONNECTOR_AUTH.md), [worker setup](docs/CONNECTOR_WORKER.md), [editorial contracts](docs/CONNECTOR_EDITORIAL.md), and [Meta Muse, GPT/ChatGPT, Claude and Grok setup](docs/clients/README.md).
+
+Local HTTP MCP and synthetic generation have been tested. Hosted OAuth, individual assistant accounts and public deployment have not. Studio supports direct gateway uploads and Premium generation. Browser OAuth sign-in is still in progress. No hosting credits have been spent.
 
 ## Local setup
 
@@ -16,6 +24,15 @@ python -m venv .venv
 pip install -e ".[dev]"
 python skills\beat-saber-mapping\scripts\bootstrap.py --tier core
 ```
+
+For a guided Windows setup and a read-only dependency check, use the included launcher:
+
+```powershell
+.\Start-BeatForge.ps1 -Setup -Check
+.\Start-BeatForge.ps1
+```
+
+The launcher never downloads model weights during its doctor pass. It reports missing optional trackers and the local official corpus separately from the dependencies required to open Studio.
 
 Optional audio models (Beat This, BeatNet+, All-In-One, Demucs) need a working
 local PyTorch install. If `torch_python.dll` fails to load from the bootstrap
@@ -53,6 +70,20 @@ Full-mix consensus still requires median ≤ 10 ms, p95 ≤ 20 ms, and drift ≤
 The optional Codex review key lives in Windows Credential Manager as
 `BeatForge:codex`. The studio writes it from the Codex setup dialog; it never
 prints it back.
+
+## Feedback and self-improvement
+
+Studio records only explicit local feedback against the exact chart hash, audio hash, difficulty, tester, and optional beat range. Presets, A/B preferences, and accepted revisions are exportable from `/api/learning/export` without copying song audio. Suggestions are bounded adjustments derived from repeated feedback; they are shown for approval and never silently retrain or rewrite a map.
+
+The RL path requires an explicit checkpoint and uses the same sample-aligned analysis features for training, evaluation, and generation. Held-out reports and content hashes are required before a checkpoint can enter `data/model_registry`; promotion is blocked by hard validation failures or quality regressions, and `rollback` restores the prior immutable version. Training reward and structural QA are reported separately from human preferences and headset evidence.
+
+Run the regression suites with isolated temporary files:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests -q -m "not corpus and not network and not hardware and not codex"
+$env:PYTHONPATH = "skills/beat-saber-mapping/scripts"
+.venv\Scripts\python.exe -m pytest skills/beat-saber-mapping/tests -q -m "not corpus"
+```
 
 ## Failure recovery
 

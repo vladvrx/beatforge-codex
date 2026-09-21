@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
+import sys
+import threading
 import time
 import traceback
 import uuid
@@ -17,7 +20,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from beatforge.install import find_custom_levels, install_generated_map_elevated, install_map, launch_beat_saber
-from beatforge.premium import ROOT, SKILL, package_map, run_premium_pipeline, summarize_map
+from beatforge.premium import ROOT, SKILL, PipelineCancelled, package_map, run_premium_pipeline, summarize_map
+from beatforge.mapping_plan import normalize_mapping_plan
+
+# The RL registry is a portable skill module rather than an installed package.
+# Make its import deterministic for a first request made before /api/learning.
+_SKILL_SCRIPTS = SKILL / "scripts"
+if str(_SKILL_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SKILL_SCRIPTS))
 from beatforge.release_route import ai_release_route_enabled
 from beatforge.providers import (
     PROVIDERS,
@@ -39,7 +49,8 @@ JOBS_DIR = ROOT / "data" / "jobs"
 IMPORTS_DIR = ROOT / "data" / "imports"
 SETTINGS_FILE = ROOT / "data" / "provider-settings.json"
 METADATA_DIR = ROOT / "data" / "metadata"
-JOB_TTL_SECONDS = 24 * 3600
+ACTIVE_STATES = {"queued", "running", "validating", "cancelling"}
+STATUS_LOCK = threading.RLock()
 STUDIO_STATES = (
     "needs_anchors",
     "needs_palette",
@@ -51,6 +62,8 @@ STUDIO_STATES = (
     "release_candidate",
     "invalid",
     "error",
+    "interrupted",
+    "cancelled",
 )
 TERMINAL_STATES = {state for state in STUDIO_STATES if state != "validating"}
 STUDIO_DIFFICULTIES = ("Easy", "Normal", "Hard", "Expert", "ExpertPlus")
@@ -207,21 +220,26 @@ def _installed_playtest_maps() -> list[dict[str, Any]]:
     return maps
 
 
-def _cleanup_old_jobs(max_age: float = JOB_TTL_SECONDS) -> int:
+def _reconcile_interrupted_jobs() -> int:
+    """Keep saved work and make interrupted process-local workers retryable."""
     if not JOBS_DIR.is_dir():
         return 0
-    now = time.time()
-    removed = 0
+    recovered = 0
     for directory in JOBS_DIR.iterdir():
         if not directory.is_dir():
             continue
         try:
-            if now - directory.stat().st_mtime > max_age:
-                shutil.rmtree(directory, ignore_errors=True)
-                removed += 1
-        except OSError:
+            status = _read_status(directory.name)
+            if status.get("status") not in ACTIVE_STATES:
+                continue
+            cancelled = (directory / "cancel.requested").is_file()
+            status.update(status="cancelled" if cancelled else "interrupted", localStatus=None)
+            status = _append_stage(status, status["status"], "Studio restarted before this run finished. Retry uses the saved audio, anchors, palette, and mapping settings.")
+            _write_status(directory.name, status)
+            recovered += 1
+        except (OSError, ValueError, HTTPException):
             continue
-    return removed
+    return recovered
 
 
 def _metadata_manifest_path(metadata_id: str) -> Path:
@@ -265,7 +283,7 @@ def _metadata_cover_path(metadata_id: str | None) -> Path | None:
 
 @app.on_event("startup")
 def _on_startup() -> None:
-    _cleanup_old_jobs()
+    _reconcile_interrupted_jobs()
 
 
 def _job_dir(job_id: str) -> Path:
@@ -284,9 +302,48 @@ def _read_status(job_id: str) -> dict[str, Any]:
 def _write_status(job_id: str, data: dict[str, Any]) -> None:
     directory = _job_dir(job_id)
     directory.mkdir(parents=True, exist_ok=True)
-    temporary = directory / "status.json.tmp"
-    temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    temporary.replace(directory / "status.json")
+    with STATUS_LOCK:
+        timestamp = time.time()
+        data = {**data, "id": job_id, "createdAt": data.get("createdAt", data.get("startedAt", timestamp)), "updatedAt": timestamp}
+        _write_json(directory / "status.json", data)
+
+
+def _write_json(path: Path, data: Any) -> None:
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _cancel_requested(job_id: str) -> bool:
+    return (_job_dir(job_id) / "cancel.requested").is_file()
+
+
+def _qa_report(map_dir: Path) -> dict[str, Any]:
+    """A missing or malformed report cannot establish that hard gates passed."""
+    path = map_dir / "_beatforge" / "qa_report.json"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict) or not isinstance(report.get("errors"), list):
+            raise ValueError("QA report must contain an errors list")
+        if not isinstance(report.get("warnings", []), list):
+            raise ValueError("QA report warnings must be a list")
+        if report.get("status") not in {"playtest_candidate", "release_candidate"} and not report["errors"]:
+            raise ValueError("QA report has not passed validation")
+        return report
+    except (OSError, ValueError) as error:
+        return {"status": "invalid", "errors": [f"QA report unavailable or invalid: {error}"], "warnings": []}
+
+
+def _public_job(data: dict[str, Any]) -> dict[str, Any]:
+    result = {key: value for key, value in data.items() if key != "trace"}
+    job_id = str(result["id"])
+    active = result.get("status") in ACTIVE_STATES
+    result["canCancel"] = active and result.get("status") != "cancelling"
+    result["canRetry"] = not active and not result.get("revisionOf") and any(_job_dir(job_id).glob("input.*"))
+    return result
 
 
 def _audio_path(job_id: str) -> Path:
@@ -303,6 +360,8 @@ def _append_stage(data: dict[str, Any], stage: str, detail: str) -> dict[str, An
 
 
 def _install_pack_to_custom_levels(job_id: str, data: dict[str, Any]) -> Path:
+    if data.get("localStatus") not in {"playtest_candidate", "unconfirmed_pack"} or _qa_report(_job_dir(job_id) / "map")["errors"]:
+        raise ValueError("The map must pass its local QA report before installation")
     zip_path = _job_dir(job_id) / "map.zip"
     if not zip_path.is_file():
         raise FileNotFoundError("Generated map zip is missing")
@@ -327,7 +386,7 @@ def _run_job(job_id: str) -> None:
             current = {**current, "stage": stage, "detail": detail}
         current.update(
             {
-                "status": "validating" if stage == "validating" else "running",
+                "status": "cancelling" if _cancel_requested(job_id) else "validating" if stage == "validating" else "running",
                 "elapsed": round(time.time() - start, 2),
                 "startedAt": current.get("startedAt") or start,
             }
@@ -337,6 +396,8 @@ def _run_job(job_id: str) -> None:
         _write_status(job_id, current)
 
     try:
+        if _cancel_requested(job_id):
+            raise PipelineCancelled("Generation cancelled")
         job_dir = _job_dir(job_id)
         map_dir = job_dir / "map"
         anchors = job_dir / "anchors.json"
@@ -353,17 +414,21 @@ def _run_job(job_id: str) -> None:
             palette=palette if palette.is_file() else None,
             cover=metadata_cover,
             progress=progress,
-            allow_unconfirmed=True,
+            allow_unconfirmed=bool(initial.get("continueUnconfirmed", False)),
             difficulties=list(initial.get("difficulties") or STUDIO_DIFFICULTIES),
+            mapping_plan=initial.get("mappingPlan"),
+            engine=str(initial.get("engine") or "premium"),
+            rl_model=Path(initial["rlModel"]) if initial.get("rlModel") else None,
+            cancel_requested=lambda: _cancel_requested(job_id),
         )
+        if _cancel_requested(job_id):
+            raise PipelineCancelled("Generation cancelled")
         status = result["status"]
         map_ready = (map_dir / "Info.dat").is_file()
         if map_ready and status in {"playtest_candidate", "invalid"}:
             progress("validating", "checking schema, timing, same-color flow, collisions, hazards, and packaging")
-            package_map(map_dir, job_dir / "map.zip")
             summary = summarize_map(map_dir)
-            qa_path = map_dir / "_beatforge" / "qa_report.json"
-            qa = json.loads(qa_path.read_text(encoding="utf-8")) if qa_path.is_file() else {"status": "invalid"}
+            qa = _qa_report(map_dir)
             qa_failed = bool(qa.get("errors"))
             analysis_path = map_dir / "_beatforge" / "analysis.json"
             timing_verified = False
@@ -397,6 +462,13 @@ def _run_job(job_id: str) -> None:
                     "timingVerified": timing_verified,
                 }
             )
+            if qa_failed:
+                current["error"] = "Local validation failed. Open the QA report before retrying."
+                _write_status(job_id, current)
+                return
+            if _cancel_requested(job_id):
+                raise PipelineCancelled("Generation cancelled")
+            package_map(map_dir, job_dir / "map.zip")
             try:
                 destination = _install_pack_to_custom_levels(job_id, current)
             except Exception as error:
@@ -422,8 +494,12 @@ def _run_job(job_id: str) -> None:
         if status in {"error", "invalid", "corpus_incomplete"}:
             current["error"] = (result.get("stderr") or result.get("stdout") or "pipeline failed")[-4000:]
         _write_status(job_id, current)
+    except PipelineCancelled:
+        current = _append_stage(_read_status(job_id), "cancelled", "Generation stopped. Retry keeps the saved audio and mapping settings.")
+        _write_status(job_id, {**current, "status": "cancelled", "localStatus": None, "elapsed": round(time.time() - start, 2)})
     except Exception as error:
-        _write_status(job_id, {**initial, "status": "error", "error": str(error), "trace": traceback.format_exc(), "elapsed": round(time.time() - start, 2)})
+        current = _read_status(job_id)
+        _write_status(job_id, {**current, "status": "error", "localStatus": None, "error": str(error), "trace": traceback.format_exc(), "elapsed": round(time.time() - start, 2)})
 
 
 def _settings() -> dict[str, Any]:
@@ -460,11 +536,13 @@ def _review_passes(job_dir: Path) -> tuple[bool, list[dict[str, Any]]]:
 def _playtest_gate(job_dir: Path, required: list[str] | None = None) -> dict[str, Any]:
     path = job_dir / "playtests.json"
     evidence = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-    passing = [item for item in evidence if item.get("passed")]
+    latest = {(item.get("difficulty"), item.get("speed"), item.get("tester")): item for item in evidence}
+    failures = {(item.get("difficulty"), item.get("speed")) for item in latest.values() if not item.get("passed")}
+    passing = [item for item in latest.values() if item.get("passed") and (item.get("difficulty"), item.get("speed")) not in failures]
     full = {item.get("difficulty") for item in passing if item.get("speed") == "full"}
     slow = {item.get("difficulty") for item in passing if item.get("speed") == "slow"}
     fresh = [item for item in passing if item.get("freshSightRead")]
-    primary_testers = {item.get("tester") for item in passing if not item.get("freshSightRead")}
+    primary_testers = {item.get("tester") for item in evidence if not item.get("freshSightRead")}
     required_difficulties = set(required or STUDIO_DIFFICULTIES)
     expert_slow = {name for name in ("Expert", "ExpertPlus") if name in required_difficulties}
     return {
@@ -472,6 +550,7 @@ def _playtest_gate(job_dir: Path, required: list[str] | None = None) -> dict[str
         "expertSlow": expert_slow.issubset(slow),
         "separateFreshSightRead": any(item.get("tester") not in primary_testers for item in fresh),
         "evidenceCount": len(evidence),
+        "unresolvedFailures": len(failures),
     }
 
 
@@ -493,11 +572,16 @@ def _sync_playtest_provenance(job_dir: Path, playtests: dict[str, Any]) -> dict[
     gate["fullSpeedVrPlaytest"] = bool(playtests.get("allFiveFullSpeed"))
     gate["slowVrPlaytest"] = bool(playtests.get("expertSlow"))
     gate["freshSightRead"] = bool(playtests.get("separateFreshSightRead"))
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _write_json(path, payload)
     return gate
 
 
 def _update_release_status(job_id: str) -> dict[str, Any]:
+    with STATUS_LOCK:
+        return _update_release_status_locked(job_id)
+
+
+def _update_release_status_locked(job_id: str) -> dict[str, Any]:
     job_dir = _job_dir(job_id)
     status = _read_status(job_id)
     review_passed, reports = _review_passes(job_dir)
@@ -598,16 +682,31 @@ async def generate(
     mapper: str = Form("BeatForge"),
     seed: int = Form(42),
     difficulties: str | None = Form(None),
-    metadata_id: str | None = Form(None),
+    metadata_id: str | None = Form(None, alias="metadataId"),
+    mapping_plan: str | None = Form(None, alias="mappingPlan"),
+    engine: str = Form("premium"),
+    rl_model: str | None = Form(None, alias="rlModel"),
 ) -> JSONResponse:
     suffix = Path(audio.filename or "song.mp3").suffix.casefold() or ".mp3"
     if suffix not in {".mp3", ".wav", ".ogg", ".egg", ".flac", ".m4a", ".mp4"}:
         raise HTTPException(400, "Upload MP3, WAV, OGG, FLAC, M4A, or MP4 audio")
     chosen = parse_studio_difficulties(difficulties)
+    if engine not in {"premium", "rl"}:
+        raise HTTPException(400, "Engine must be premium or rl")
+    if engine == "rl" and not (rl_model or "").strip():
+        from beatforge.learning import LEARNING_FILE
+        from rl.registry import active_checkpoint
+        try:
+            rl_model = str(active_checkpoint(LEARNING_FILE.parent / "model_registry").resolve())
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(400, "No valid evaluated model is active. Supply a trained checkpoint or initialize the local model registry.") from error
+    try:
+        normalized_plan = normalize_mapping_plan(json.loads(mapping_plan) if mapping_plan else None)
+    except (ValueError, TypeError) as error:
+        raise HTTPException(400, f"Invalid mapping plan: {error}") from error
     if metadata_id:
         _metadata_manifest(metadata_id)
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
     destination = _job_dir(job_id)
     destination.mkdir(parents=True)
@@ -622,6 +721,9 @@ async def generate(
         "profile": "official-premium",
         "difficulties": chosen,
         "metadataId": metadata_id,
+        "mappingPlan": normalized_plan,
+        "engine": engine,
+        "rlModel": rl_model,
         "stages": [],
         "startedAt": time.time(),
         "elapsed": 0,
@@ -630,6 +732,58 @@ async def generate(
     _write_status(job_id, status)
     background_tasks.add_task(_run_job, job_id)
     return JSONResponse({"id": job_id, "status": "queued"})
+
+
+@app.get("/api/jobs")
+def job_history(limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    jobs = []
+    if JOBS_DIR.is_dir():
+        for directory in JOBS_DIR.iterdir():
+            if not directory.is_dir():
+                continue
+            try:
+                jobs.append(_public_job(_read_status(directory.name)))
+            except (OSError, ValueError, KeyError, HTTPException):
+                continue
+    jobs.sort(key=lambda job: float(job.get("createdAt", job.get("startedAt", 0))), reverse=True)
+    return {"jobs": jobs[:limit], "total": len(jobs)}
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def job_retry(job_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    original = _read_status(job_id)
+    if original.get("status") in ACTIVE_STATES:
+        raise HTTPException(409, "Cancel or finish this run before retrying")
+    if original.get("revisionOf"):
+        raise HTTPException(409, "Retry a section revision from its original map's section controls")
+    audio = _audio_path(job_id)
+    new_id = uuid.uuid4().hex[:12]
+    destination = _job_dir(new_id)
+    destination.mkdir(parents=True)
+    shutil.copy2(audio, destination / audio.name)
+    for filename in ("anchors.json", "approved_palette.json"):
+        source = _job_dir(job_id) / filename
+        if source.is_file():
+            shutil.copy2(source, destination / filename)
+    preserved = {key: original[key] for key in ("title", "artist", "mapper", "seed", "profile", "difficulties", "metadataId", "mappingPlan", "engine", "rlModel", "continueUnconfirmed") if key in original}
+    status = {**preserved, "id": new_id, "retryOf": job_id, "status": "queued", "stages": [], "startedAt": time.time(), "elapsed": 0, "decodePercent": None}
+    _write_status(new_id, _append_stage(status, "retry", "Retrying with saved audio, confirmed anchors, palette, and mapping settings."))
+    background_tasks.add_task(_run_job, new_id)
+    return {"id": new_id, "status": "queued", "retryOf": job_id}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def job_cancel(job_id: str) -> dict[str, Any]:
+    with STATUS_LOCK:
+        data = _read_status(job_id)
+        if data.get("status") not in ACTIVE_STATES:
+            raise HTTPException(409, "This run has already stopped")
+        (_job_dir(job_id) / "cancel.requested").touch()
+        state = "cancelled" if data.get("status") == "queued" else "cancelling"
+        data = _append_stage(data, state, "Cancellation requested; the generation worker is stopping.")
+        data.update(status=state, localStatus=None)
+        _write_status(job_id, data)
+    return {"id": job_id, "status": state}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -642,10 +796,9 @@ def job_status(job_id: str) -> dict[str, Any]:
         "release_candidate",
     }:
         data = _update_release_status(job_id)
-    data.pop("trace", None)
     if data.get("startedAt") and data.get("status") in {"queued", "running", "validating"}:
         data["elapsed"] = round(time.time() - float(data["startedAt"]), 2)
-    return data
+    return _public_job(data)
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -656,7 +809,7 @@ def job_events(job_id: str) -> StreamingResponse:
         previous = ""
         deadline = time.time() + 3600
         while time.time() < deadline:
-            data = _read_status(job_id)
+            data = _public_job(_read_status(job_id))
             if data.get("startedAt") and data.get("status") in {"queued", "running", "validating"}:
                 data = {**data, "elapsed": round(time.time() - float(data["startedAt"]), 2)}
             encoded = json.dumps(data, separators=(",", ":"))
@@ -680,15 +833,25 @@ def job_anchors(job_id: str, payload: dict[str, Any], background_tasks: Backgrou
     if not isinstance(anchors, list) or len(anchors) < 2:
         raise HTTPException(400, "At least two anchors are required")
     last_beat = last_sample = None
+    normalized_anchors = []
     for index, anchor in enumerate(anchors):
         if not isinstance(anchor, dict) or "beat" not in anchor or not ({"sample", "timeSeconds"} & set(anchor)):
             raise HTTPException(400, f"Anchor {index} requires beat and sample or timeSeconds")
-        beat = float(anchor["beat"])
-        sample = int(anchor.get("sample", round(float(anchor["timeSeconds"]) * 44100)))
+        try:
+            beat = float(anchor["beat"])
+            raw_sample = float(anchor["sample"]) if "sample" in anchor else float(anchor["timeSeconds"]) * 44100
+            if not math.isfinite(beat) or not math.isfinite(raw_sample) or beat < 0 or raw_sample < 0:
+                raise ValueError("beat and time must be finite nonnegative numbers")
+            if "sample" in anchor and not raw_sample.is_integer():
+                raise ValueError("sample must be an integer")
+            sample = round(raw_sample)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise HTTPException(400, f"Invalid anchor {index}: {error}") from error
         if last_beat is not None and (beat <= last_beat or sample <= int(last_sample)):
             raise HTTPException(400, "Anchors must increase strictly in beat and sample")
         last_beat, last_sample = beat, sample
-    (_job_dir(job_id) / "anchors.json").write_text(json.dumps({"anchors": anchors}, indent=2), encoding="utf-8")
+        normalized_anchors.append({**anchor, "beat": beat, "sample": sample})
+    _write_json(_job_dir(job_id) / "anchors.json", {"anchors": normalized_anchors})
     status["status"] = "queued"
     status = _append_stage(status, "anchors", "confirmed anchors saved; refitting the beat grid")
     _write_status(job_id, status)
@@ -828,6 +991,8 @@ def job_download(job_id: str) -> FileResponse:
     data = _read_status(job_id)
     if data.get("localStatus") not in {"playtest_candidate", "unconfirmed_pack"}:
         raise HTTPException(409, "Map package is not ready to download")
+    if _qa_report(_job_dir(job_id) / "map")["errors"]:
+        raise HTTPException(409, "Map package is blocked by a missing or failed QA report")
     path = _job_dir(job_id) / "map.zip"
     if not path.is_file():
         raise HTTPException(404, "Map package is missing")
@@ -873,11 +1038,10 @@ def import_installed_map(payload: ImportInstalledMap) -> dict[str, Any]:
         raise HTTPException(409, "Only BeatForge-generated folders with a QA report can be attached")
     try:
         info = json.loads(info_path.read_text(encoding="utf-8-sig"))
-        qa = json.loads(qa_path.read_text(encoding="utf-8"))
+        qa = _qa_report(source_dir)
     except (OSError, json.JSONDecodeError) as error:
         raise HTTPException(409, f"Installed map metadata is unreadable: {error}") from error
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
     job_dir = _job_dir(job_id)
     map_dir = job_dir / "map"
@@ -1048,13 +1212,16 @@ def playtests(job_id: str, evidence: PlaytestEvidence) -> dict[str, Any]:
         raise HTTPException(409, "Install and validate a playtest candidate first")
     if evidence.difficulty not in {"Easy", "Normal", "Hard", "Expert", "ExpertPlus"}:
         raise HTTPException(400, "Unknown difficulty")
+    if evidence.difficulty not in data.get("difficulties", STUDIO_DIFFICULTIES):
+        raise HTTPException(400, "This difficulty is not present in this map")
     if evidence.speed not in {"slow", "full"}:
         raise HTTPException(400, "Speed must be slow or full")
     path = _job_dir(job_id) / "playtests.json"
-    items = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-    items.append(evidence.model_dump(by_alias=True) | {"recordedAt": time.time()})
-    path.write_text(json.dumps(items, indent=2), encoding="utf-8")
-    status = _update_release_status(job_id)
+    with STATUS_LOCK:
+        items = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        items.append(evidence.model_dump(by_alias=True) | {"recordedAt": time.time()})
+        _write_json(path, items)
+        status = _update_release_status(job_id)
     return {"status": status["status"], "releaseGate": status.get("releaseGate"), "evidence": items}
 
 
@@ -1068,3 +1235,12 @@ def job_click_track(job_id: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(404, "Click track is not available yet")
     return FileResponse(path, media_type="audio/wav", filename="click_track.wav")
+
+
+from beatforge.preview import router as preview_router
+
+app.include_router(preview_router)
+
+from beatforge.learning import router as learning_router
+
+app.include_router(learning_router)

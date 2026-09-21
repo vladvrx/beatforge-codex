@@ -21,6 +21,7 @@ from kinematics import (
     vision_blocking_double,
 )
 from safety_contract import RECOVERY_BEATS, occupied_until
+from .safety import ValidationClock, transition_is_safe
 try:
     from .rewards import CompositeReward, RewardBreakdown
 except ImportError:
@@ -71,10 +72,14 @@ class BeatSaberEnv:
         difficulty: str = "Expert",
         lookahead_steps: int = 4,
     ):
-        self.bpm = max(1.0, float(bpm))
+        self.bpm = float(bpm)
+        if not math.isfinite(self.bpm) or self.bpm <= 0:
+            raise ValueError("RL BPM must be finite and positive")
+        self.base_bpm = self.bpm
         self.difficulty = difficulty if difficulty in DIFFICULTIES else "Expert"
         self.target_nps = TARGET_NPS_MAP.get(self.difficulty, 4.25)
         self.lookahead_steps = max(1, lookahead_steps)
+        self.rng = np.random.default_rng(0)
 
         self.reward_engine = CompositeReward(
             difficulty=self.difficulty,
@@ -84,9 +89,10 @@ class BeatSaberEnv:
 
         # Internal state buffers
         self.beat_grid = self._normalize_beat_grid(beat_grid) if beat_grid is not None else self._generate_synthetic_grid(64, self.bpm)
-        self.audio_features = audio_features or self._generate_synthetic_audio(len(self.beat_grid))
+        self.audio_features = audio_features if audio_features is not None else self._generate_synthetic_audio(len(self.beat_grid))
         self.current_step = 0
         self.total_steps = len(self.beat_grid)
+        self.validation_clock = ValidationClock(self.audio_features, self.beat_grid, self.base_bpm)
 
         # Kinematic hand states
         self.red_prev: Optional[Dict[str, Any]] = None
@@ -106,31 +112,25 @@ class BeatSaberEnv:
         if beat_grid is None:
             return self._generate_synthetic_grid(64, self.bpm)
         if isinstance(beat_grid, dict):
-            if "beats" in beat_grid and isinstance(beat_grid["beats"], list):
-                return [float(b) for b in beat_grid["beats"]]
-            if "tempoRegions" in beat_grid:
-                max_beat = max((float(r.get("endBeat", 0.0)) for r in beat_grid.get("tempoRegions", [])), default=64.0)
-                return [round(i * 0.25, 4) for i in range(max(16, int(max_beat * 4)))]
-            return self._generate_synthetic_grid(64, self.bpm)
-        return [float(b) for b in beat_grid]
+            raise ValueError("Use rl.features.load_analysis_features to project an analysis grid")
+        result = [float(b) for b in beat_grid]
+        if not result or not np.isfinite(result).all() or np.any(np.diff(result) <= 0):
+            raise ValueError("Environment beat grid must be nonempty, finite, and strictly increasing")
+        return result
 
     def _generate_synthetic_grid(self, num_beats: int, bpm: float) -> List[float]:
         # Quarter-beat subdivision
         return [round(i * 0.25, 4) for i in range(num_beats * 4)]
 
     def _generate_synthetic_audio(self, length: int) -> Dict[str, Any]:
+        stems = ("drums", "bass", "guitar", "piano", "vocals", "other")
         return {
-            "onsets": np.random.uniform(0.0, 1.0, size=(length,)).tolist(),
-            "flux": np.random.uniform(0.0, 1.0, size=(length,)).tolist(),
-            "stems": {
-                "drums": np.random.uniform(0.0, 1.0, size=(length,)).tolist(),
-                "bass": np.random.uniform(0.0, 1.0, size=(length,)).tolist(),
-                "guitar": np.random.uniform(0.0, 0.5, size=(length,)).tolist(),
-                "piano": np.random.uniform(0.0, 0.5, size=(length,)).tolist(),
-                "vocals": np.random.uniform(0.0, 0.8, size=(length,)).tolist(),
-                "other": np.random.uniform(0.0, 0.5, size=(length,)).tolist(),
-            },
-            "sections": ["verse"] * length,
+            "onsets": [1.0 if i % 4 == 0 else 0.0 for i in range(length)],
+            "flux": [0.0] * length,
+            "stems": {stem: [0.0] * length for stem in stems},
+            "stemAvailability": {stem: False for stem in stems},
+            "sections": ["unknown"] * length,
+            "provenance": {"source": "synthetic-test-pulse", "timingStatus": "synthetic"},
         }
 
     def reset(
@@ -142,32 +142,34 @@ class BeatSaberEnv:
         difficulty: Optional[str] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         if seed is not None:
-            np.random.seed(seed)
+            self.rng = np.random.default_rng(seed)
 
         if bpm is not None:
-            self.bpm = max(1.0, float(bpm))
+            if not math.isfinite(float(bpm)) or float(bpm) <= 0:
+                raise ValueError("RL BPM must be finite and positive")
+            self.bpm = self.base_bpm = float(bpm)
         if difficulty is not None and difficulty in DIFFICULTIES:
             self.difficulty = difficulty
             self.target_nps = TARGET_NPS_MAP.get(self.difficulty, 4.25)
-            self.reward_engine = CompositeReward(
-                difficulty=self.difficulty,
-                bpm=self.bpm,
-                target_nps=self.target_nps,
-            )
+        self.reward_engine = CompositeReward(
+            difficulty=self.difficulty, bpm=self.bpm, target_nps=self.target_nps,
+        )
 
         if beat_grid is not None:
             self.beat_grid = self._normalize_beat_grid(beat_grid)
         elif audio_features is not None:
-            self.beat_grid = self._generate_synthetic_grid(len(audio_features.get("onsets", [])), self.bpm)
+            self.beat_grid = self._normalize_beat_grid([i * 0.25 for i in range(len(audio_features.get("onsets", [])))])
 
         if audio_features is not None:
             self.audio_features = audio_features
 
         self.current_step = 0
         self.total_steps = len(self.beat_grid)
+        self.validation_clock = ValidationClock(self.audio_features, self.beat_grid, self.base_bpm)
         self.red_prev = None
         self.blue_prev = None
         self.placed_notes = []
+        self._update_step_tempo()
 
         obs = self._get_observation()
         info = {"current_step": 0, "beat": self.beat_grid[0] if self.beat_grid else 0.0}
@@ -175,10 +177,12 @@ class BeatSaberEnv:
 
     def action_masks(self) -> Tuple[np.ndarray, np.ndarray]:
         """Compute binary action masks for Left (Red) and Right (Blue) hands."""
+        self._update_step_tempo()
         mask_red = np.ones(NUM_HAND_ACTIONS, dtype=bool)
         mask_blue = np.ones(NUM_HAND_ACTIONS, dtype=bool)
 
         current_beat = self.beat_grid[self.current_step] if self.current_step < self.total_steps else 0.0
+        validation_beat = self.validation_clock.beat(current_beat)
         recovery_beats = RECOVERY_BEATS.get(self.difficulty, 0.30)
 
         # Rhythmic grid subdivision gating
@@ -193,7 +197,7 @@ class BeatSaberEnv:
             return mask_red, mask_blue
 
         # 1. Mask Left Hand (Red, Color 0)
-        if self.red_prev is not None and (current_beat - float(self.red_prev["b"])) < (recovery_beats - 1e-5):
+        if self.red_prev is not None and (validation_beat - self.validation_clock.beat(float(self.red_prev["b"]))) < recovery_beats:
             mask_red[1:] = False
         else:
             for act in range(1, NUM_HAND_ACTIONS):
@@ -204,14 +208,11 @@ class BeatSaberEnv:
                 candidate = {"b": current_beat, "c": 0, "x": x, "y": y, "d": d}
 
                 if self.red_prev is not None:
-                    finding = transition_finding(
-                        self.red_prev, candidate, self.bpm, recovery_beats=recovery_beats
-                    )
-                    if finding is not None:
+                    if not transition_is_safe(self.validation_clock.note(self.red_prev), self.validation_clock.note(candidate), self.base_bpm, self.difficulty):
                         mask_red[act] = False
 
         # 2. Mask Right Hand (Blue, Color 1)
-        if self.blue_prev is not None and (current_beat - float(self.blue_prev["b"])) < (recovery_beats - 1e-5):
+        if self.blue_prev is not None and (validation_beat - self.validation_clock.beat(float(self.blue_prev["b"]))) < recovery_beats:
             mask_blue[1:] = False
         else:
             for act in range(1, NUM_HAND_ACTIONS):
@@ -222,13 +223,26 @@ class BeatSaberEnv:
                 candidate = {"b": current_beat, "c": 1, "x": x, "y": y, "d": d}
 
                 if self.blue_prev is not None:
-                    finding = transition_finding(
-                        self.blue_prev, candidate, self.bpm, recovery_beats=recovery_beats
-                    )
-                    if finding is not None:
+                    if not transition_is_safe(self.validation_clock.note(self.blue_prev), self.validation_clock.note(candidate), self.base_bpm, self.difficulty):
                         mask_blue[act] = False
 
         return mask_red, mask_blue
+
+    def blue_action_mask(self, red_action: int, base_mask: Optional[np.ndarray] = None) -> np.ndarray:
+        """Condition the second hand on the first hand's actual selected action."""
+        mask = (base_mask if base_mask is not None else self.action_masks()[1]).copy()
+        decoded = decode_hand_action(red_action)
+        if decoded is None or self.current_step >= self.total_steps:
+            return mask
+        beat = self.beat_grid[self.current_step]
+        red = {"b": beat, "c": 0, "x": decoded[0], "y": decoded[1], "d": decoded[2]}
+        for action in np.flatnonzero(mask[1:]) + 1:
+            x, y, direction = decode_hand_action(int(action))
+            blue = {"b": beat, "c": 1, "x": x, "y": y, "d": direction}
+            if cross_hand_finding(red, blue) is not None or vision_blocking_double(red, blue):
+                mask[action] = False
+        mask[ACTION_IDLE] = True
+        return mask
 
     def step(
         self, action: Tuple[int, int]
@@ -240,6 +254,7 @@ class BeatSaberEnv:
 
         act_red, act_blue = action
         current_beat = self.beat_grid[self.current_step]
+        self._update_step_tempo()
 
         # Decode actions
         red_decoded = decode_hand_action(act_red)
@@ -269,16 +284,16 @@ class BeatSaberEnv:
 
         # Compute Step Reward
         breakdown: RewardBreakdown = self.reward_engine.compute_step_reward(
-            beat=current_beat,
-            red_prev=self.red_prev,
-            red_curr=red_curr,
-            blue_prev=self.blue_prev,
-            blue_curr=blue_curr,
+            beat=self.validation_clock.beat(current_beat),
+            red_prev=self.validation_clock.note(self.red_prev),
+            red_curr=self.validation_clock.note(red_curr),
+            blue_prev=self.validation_clock.note(self.blue_prev),
+            blue_curr=self.validation_clock.note(blue_curr),
             onset_strength=onset,
             stem_energy=stem_energy,
             is_downbeat=is_downbeat,
             section_type=section_type,
-            recent_notes=self.placed_notes[-self.history_window:],
+            recent_notes=[self.validation_clock.note(note) for note in self.placed_notes[-self.history_window:]],
             current_nps=current_nps,
             target_nps=self.target_nps,
         )
@@ -292,6 +307,7 @@ class BeatSaberEnv:
             self.blue_prev = blue_curr
 
         self.current_step += 1
+        self._update_step_tempo()
         terminated = self.current_step >= self.total_steps
         truncated = False
 
@@ -310,6 +326,13 @@ class BeatSaberEnv:
             return arr[idx]
         return default
 
+    def _update_step_tempo(self) -> None:
+        if not self.total_steps:
+            return
+        value = self._get_audio_field("stepBpms", min(self.current_step, self.total_steps - 1), self.bpm)
+        self.bpm = float(value)
+        self.reward_engine.kinematic.bpm = self.base_bpm
+
     def _get_stem_energy(self, stem: str, idx: int) -> float:
         stems = self.audio_features.get("stems", {})
         arr = stems.get(stem)
@@ -324,7 +347,11 @@ class BeatSaberEnv:
         span_beats = float(recent[-1]["b"]) - float(recent[0]["b"])
         if span_beats <= 1e-6:
             return 0.0
-        span_seconds = span_beats * 60.0 / self.bpm
+        times = self.audio_features.get("timesSeconds")
+        if times is not None and len(times) == self.total_steps:
+            span_seconds = float(np.interp(float(recent[-1]["b"]), self.beat_grid, times) - np.interp(float(recent[0]["b"]), self.beat_grid, times))
+        else:
+            span_seconds = span_beats * 60.0 / self.bpm
         return len(recent) / max(0.1, span_seconds)
 
     def _get_observation(self) -> np.ndarray:

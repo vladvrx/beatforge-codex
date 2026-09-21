@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import socket
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,6 @@ from beatforge.api import STUDIO_STATES, app
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STUDIO_PORT = 18765
 
 
 def _playwright_chromium():
@@ -28,12 +28,22 @@ def _playwright_chromium():
 
 
 @pytest.fixture(scope="module")
-def studio_url():
+def studio_url(tmp_path_factory):
     import uvicorn
+    from beatforge import api, learning
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=STUDIO_PORT, log_level="warning")
+    isolated = tmp_path_factory.mktemp("browser-studio")
+    patches = pytest.MonkeyPatch()
+    for field in ("JOBS_DIR", "IMPORTS_DIR", "METADATA_DIR"):
+        patches.setattr(api, field, isolated / field.lower())
+    patches.setattr(learning, "LEARNING_FILE", isolated / "learning.json")
+    patches.setattr(api, "find_custom_levels", lambda: None)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     deadline = time.time() + 8
     while time.time() < deadline:
@@ -42,12 +52,14 @@ def studio_url():
         time.sleep(0.05)
     if not server.started:
         pytest.skip("could not bind the headless studio server")
-    yield f"http://127.0.0.1:{STUDIO_PORT}"
+    yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=4)
+    sock.close()
+    patches.undo()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def page(studio_url: str):
     playwright, browser = _playwright_chromium()
     context = browser.new_context(viewport={"width": 1280, "height": 900})
@@ -112,8 +124,11 @@ def test_playwright_mobile_tablet_and_200_percent_zoom(studio_url: str) -> None:
     for options in cases:
         playwright, browser, context, opened = _open_studio(studio_url, **options)
         try:
-            assert opened.locator("article.connector").count() == 3
+            assert opened.locator("#previewPanel").is_visible()
+            assert opened.locator("#historyPanel").is_visible()
+            assert opened.locator("#learningPanel").is_visible()
             assert opened.locator("#generate").is_visible()
+            assert opened.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
             assert opened.locator('img[alt="BeatForge"]').count() == 1
             opened.locator("#generate").click()
             assert opened.locator("#statusTitle").inner_text() == "Select a mastered audio file first."
@@ -128,7 +143,7 @@ def test_playwright_keyboard_reaches_generate_and_refuses_without_audio(studio_u
     try:
         opened.locator("body").click(position={"x": 8, "y": 8})
         seen: list[str] = []
-        for _ in range(24):
+        for _ in range(45):
             opened.keyboard.press("Tab")
             focused = opened.evaluate("document.activeElement && document.activeElement.id")
             if focused:
@@ -171,6 +186,7 @@ def test_playwright_offline_and_unconfigured_codex_state(studio_url: str) -> Non
         assert page.locator("#gameStatus").inner_text() == "Beat Saber check unavailable"
         page.evaluate("() => { document.getElementById('timingAi').hidden = false; }")
         page.locator('.timing-ai-btn[data-provider="codex"]').click()
+        page.locator("#providerDialog").wait_for(state="visible")
         assert page.locator("#providerDialog").is_visible()
         assert "OpenAI Codex setup" in page.locator("#providerName").inner_text()
         assert "never returns it to this page" in page.locator("#providerDialog").inner_text()
@@ -199,6 +215,7 @@ def test_playwright_webmcp_mock_registers_and_runs_collaboration_loop(studio_url
     try:
         opened.goto(studio_url, wait_until="networkidle")
         opened.wait_for_function("() => document.getElementById('webmcpStatus').textContent === 'WebMCP ready'")
+        opened.locator('details.connection-details > summary').click()
         result = opened.evaluate(
             """
             async () => {
@@ -208,13 +225,16 @@ def test_playwright_webmcp_mock_registers_and_runs_collaboration_loop(studio_url
               await call('set_mapping_plan')({
                 title: 'Agent Shaped Rain',
                 creativeBrief: 'Readable Expert chorus with a bright syncopated lift.',
-                difficulties: ['Normal', 'Hard', 'Expert']
+                difficulties: ['Normal', 'Hard', 'Expert'],
+                mappingPlan: {density: 0.75, noBombs: true, style: 'flow'}
               });
               const generated = JSON.parse(await call('generate_beatmap')({ reason: 'Turn the shared brief into a preview.' }));
               const evidence = JSON.parse(await call('record_human_playtest')({
                 difficulty: 'Expert', speed: 'full', passed: true, tester: 'Human tester', notes: 'Real person supplied this evidence.'
               }));
               const context = JSON.parse(await call('get_studio_context')({ includeActivity: true }));
+              const preview = JSON.parse(await call('get_chart_preview')({}));
+              const learning = JSON.parse(await call('get_learning_summary')({}));
               return {
                 names: tools.map(tool => tool.name).sort(),
                 title: document.getElementById('title').value,
@@ -222,6 +242,9 @@ def test_playwright_webmcp_mock_registers_and_runs_collaboration_loop(studio_url
                 generated,
                 evidence,
                 context,
+                preview,
+                learning,
+                planSchema: tools.find(tool => tool.name === 'set_mapping_plan').inputSchema.properties.mappingPlan,
                 activity: document.getElementById('agentActivity').innerText
               };
             }
@@ -230,16 +253,27 @@ def test_playwright_webmcp_mock_registers_and_runs_collaboration_loop(studio_url
         assert result["names"] == sorted(
             [
                 "get_studio_context",
+                "find_song_metadata",
+                "import_song_preview",
                 "set_mapping_plan",
                 "load_collaboration_demo",
                 "generate_beatmap",
                 "review_current_beatmap",
                 "record_human_playtest",
+                "get_chart_preview",
+                "get_learning_summary",
+                "record_mapping_feedback",
             ]
         )
         assert result["title"] == "Agent Shaped Rain"
         assert "Readable Expert chorus" in result["brief"]
         assert result["generated"]["mode"] == "rights-safe-demo"
+        assert result["context"]["mappingPlan"]["mappingPlan"]["density"] == 0.75
+        assert result["context"]["mappingPlan"]["mappingPlan"]["noBombs"] is True
+        assert result["preview"]["notes"] > 0
+        assert result["learning"]["feedbackCount"] == 0
+        assert result["planSchema"]["additionalProperties"] is False
+        assert result["planSchema"]["properties"]["density"]["minimum"] == 0.5
         assert result["evidence"]["releaseGate"]["evidenceCount"] == 1
         assert result["context"]["job"]["demo"] is True
         assert "Agent called generate_beatmap" in result["activity"]
